@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      TEST_DATABASE_URL: postgres://legion:legion@localhost:5432/legion?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      # Uses the Postgres that ships on the runner image (no containers).
+      - name: start postgres
+        run: |
+          sudo systemctl start postgresql.service
+          sudo -u postgres psql -c "CREATE ROLE legion LOGIN SUPERUSER PASSWORD 'legion';"
+          sudo -u postgres createdb -O legion legion
+      - name: gofmt
+        run: test -z "$(gofmt -l .)"
+      - name: vet
+        run: go vet ./...
+      - name: sqlc generated code is up to date
+        run: go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.27.0 diff
+      - name: test
+        run: go test -race -count=1 ./...
+      - name: build
+        run: make build
