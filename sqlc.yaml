@@ -11,6 +11,8 @@ sql:
         emit_json_tags: false
         emit_empty_slices: true
         emit_pointers_for_null_types: true
+        emit_enum_valid_method: true
+        emit_all_enum_values: true
         overrides:
           - db_type: inet
             nullable: true

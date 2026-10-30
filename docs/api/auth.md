@@ -62,4 +62,3 @@ Errors always look like `{"error": {"code": "...", "message": "..."}}`.
 
 - Password reset (the legacy app uses an SMS OTP). Accounts flagged
   `password_reset_required` can't log in until it exists.
-- Platform-admin "view any group as admin" (`/admin`), which lands with the group endpoints.
