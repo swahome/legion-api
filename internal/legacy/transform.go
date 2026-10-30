@@ -18,6 +18,7 @@ var DumpTables = []string{
 	"contributions", "regular_contribution_settings", "one_time_contribution_settings",
 	"contribution_member_pairings", "contribution_fine_settings", "statements",
 	"member_contributions_fines_balances",
+	"countries", "counties", "banks", "bank_branches", "settings",
 }
 
 // Options control how legacy values are mapped.
@@ -35,6 +36,7 @@ type Options struct {
 type Plan struct {
 	Users, PlatformRoles, Groups, GroupRoles, Memberships            [][]any
 	Contributions, Schedules, ContributionMembers, FineRules, Ledger [][]any
+	Countries, Counties, Banks, BankBranches, Settings               [][]any
 
 	Report Report
 }
@@ -152,12 +154,19 @@ func Transform(t Tables, roles []Row, opt Options, now time.Time) (*Plan, error)
 	p.contributionMembers(t["contribution_member_pairings"], contribs, members, now)
 	p.fineRules(t["contribution_fine_settings"], contribs, now)
 	p.ledger(t["statements"], groups, members, contribs, now)
+	countries := p.countries(t["countries"], now)
+	p.counties(t["counties"], countries, now)
+	banks := p.banks(t["banks"], now)
+	p.bankBranches(t["bank_branches"], banks, now)
+	p.settings(t["settings"])
 
 	for name, rows := range map[string][][]any{
 		"users": p.Users, "user_platform_roles": p.PlatformRoles, "groups": p.Groups,
 		"group_roles": p.GroupRoles, "memberships": p.Memberships, "contributions": p.Contributions,
 		"contribution_schedules": p.Schedules, "contribution_members": p.ContributionMembers,
 		"contribution_fine_rules": p.FineRules, "ledger_entries": p.Ledger,
+		"countries": p.Countries, "counties": p.Counties, "banks": p.Banks,
+		"bank_branches": p.BankBranches, "platform_settings": p.Settings,
 	} {
 		p.Report.Imported[name] = len(rows)
 	}

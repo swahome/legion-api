@@ -580,6 +580,44 @@ func AllPlatformRoleValues() []PlatformRole {
 	}
 }
 
+type AdminAuditLog struct {
+	ID         int64
+	ActorID    *int64
+	Action     string
+	TargetType string
+	TargetID   *int64
+	Detail     []byte
+	CreatedAt  time.Time
+}
+
+type Bank struct {
+	ID        int64
+	LegacyID  *int32
+	Name      string
+	Slug      string
+	Code      *int32
+	ShortCode string
+	Logo      string
+	Branding  []byte
+	Settings  []byte
+	IsPartner bool
+	IsDefault bool
+	IsActive  bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+type BankBranch struct {
+	ID        int64
+	LegacyID  *int32
+	BankID    int64
+	Name      string
+	Code      *int32
+	IsActive  bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 type Contribution struct {
 	ID                      int64
 	LegacyID                *int32
@@ -640,6 +678,32 @@ type ContributionSchedule struct {
 	DisableOverpayments bool
 	FinesEnabled        bool
 	UpdatedAt           time.Time
+}
+
+type Country struct {
+	ID           int64
+	LegacyID     *int32
+	Name         string
+	Code         string
+	CurrencyCode string
+	CurrencyName string
+	CallingCode  string
+	IsDefault    bool
+	IsActive     bool
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+type County struct {
+	ID        int64
+	LegacyID  *int32
+	CountryID int64
+	Name      string
+	Code      *int32
+	Capital   string
+	IsActive  bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 type Group struct {
@@ -718,6 +782,13 @@ type Membership struct {
 	JoinedAt         time.Time
 	UpdatedAt        time.Time
 	Profile          []byte
+}
+
+type PlatformSetting struct {
+	Key       string
+	Value     []byte
+	UpdatedAt time.Time
+	UpdatedBy *int64
 }
 
 type RefreshToken struct {

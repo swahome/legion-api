@@ -31,10 +31,16 @@ var targets = []struct {
 	{"contribution_members", ContributionMemberCols, func(p *Plan) [][]any { return p.ContributionMembers }},
 	{"contribution_fine_rules", FineRuleCols, func(p *Plan) [][]any { return p.FineRules }},
 	{"ledger_entries", LedgerCols, func(p *Plan) [][]any { return p.Ledger }},
+	{"countries", CountryCols, func(p *Plan) [][]any { return p.Countries }},
+	{"counties", CountyCols, func(p *Plan) [][]any { return p.Counties }},
+	{"banks", BankCols, func(p *Plan) [][]any { return p.Banks }},
+	{"bank_branches", BankBranchCols, func(p *Plan) [][]any { return p.BankBranches }},
+	{"platform_settings", SettingCols, func(p *Plan) [][]any { return p.Settings }},
 }
 
 // Tables with identity ids whose sequences must move past the imported ids.
-var identityTables = []string{"users", "groups", "group_roles", "memberships", "contributions", "contribution_fine_rules", "ledger_entries"}
+var identityTables = []string{"users", "groups", "group_roles", "memberships", "contributions",
+	"contribution_fine_rules", "ledger_entries", "countries", "counties", "banks", "bank_branches"}
 
 var enumTypes = []string{
 	"platform_role", "group_status", "membership_status", "contribution_kind",
@@ -62,7 +68,8 @@ func Load(ctx context.Context, pool *pgxpool.Pool, p *Plan, replace bool) error 
 		if replace {
 			_, err := tx.Exec(ctx, `TRUNCATE ledger_entries, contribution_fine_rules, contribution_members,
 				contribution_schedules, contributions, memberships, group_roles, groups,
-				refresh_tokens, login_attempts, user_platform_roles, users RESTART IDENTITY`)
+				refresh_tokens, login_attempts, user_platform_roles, admin_audit_log, platform_settings,
+				bank_branches, banks, counties, countries, users RESTART IDENTITY`)
 			if err != nil {
 				return fmt.Errorf("truncate: %w", err)
 			}
