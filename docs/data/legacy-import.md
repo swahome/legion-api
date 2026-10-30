@@ -33,6 +33,13 @@ other command.
   tickets and SQL can still find the same record.
 - **Applies the mapping and data rules** in `docs/schema/slice-1.md`. Every row it
   drops or changes is counted under "data issues" in the report.
+- **Imports reference data and settings.** `countries`, `counties`, `banks` and
+  `bank_branches` keep their ids. Counties with no country (all 47 legacy rows) go
+  to the default country. Bank colours move into `banks.branding`; the other bank
+  columns (OTP endpoints and the like) are kept in `banks.settings` until a feature
+  needs them. The single legacy `settings` row becomes one `platform_settings` key
+  per non-empty column, with integers stored as JSON numbers. Nothing is decrypted
+  or encrypted: values are copied as they are.
 - **Reconciles balances.** For every member it recomputes the contribution balance in
   two ways and requires them to match to the cent:
   1. in Postgres, from `ledger_entries` joined to `ledger_entry_rules`;
@@ -74,8 +81,14 @@ imported rows:
   contribution_members            92
   contribution_fine_rules         59
   ledger_entries               49649
+  countries                      233
+  counties                        47
+  banks                           65
+  bank_branches                 1936
+  platform_settings               34
 data issues (rows):
        36  contribution_schedules: regular with no frequency
+        1  countries: invalid currency or calling code, skipped
         1  groups: owner user missing, cleared
        26  ledger_entries: contribution missing or in another group, kept without contribution
      2508  ledger_entries: member missing or in another group, kept without member

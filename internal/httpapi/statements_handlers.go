@@ -19,6 +19,14 @@ var entryLabels = map[store.LedgerEntryType]string{
 	store.LedgerEntryTypeContributionTransferIn:     "Contribution transfer in",
 	store.LedgerEntryTypeContributionTransferOut:    "Contribution transfer out",
 	store.LedgerEntryTypeContributionToLoanTransfer: "Contribution transfer to loan",
+	store.LedgerEntryTypeContributionFineInvoice:    "Contribution fine",
+	store.LedgerEntryTypeFineInvoice:                "Fine",
+	store.LedgerEntryTypeMiscInvoice:                "Miscellaneous invoice",
+	store.LedgerEntryTypeFinePayment:                "Fine payment",
+	store.LedgerEntryTypeMiscPayment:                "Miscellaneous payment",
+	store.LedgerEntryTypeContributionToFineTransfer: "Contribution transfer to fine",
+	store.LedgerEntryTypeLoanToContributionTransfer: "Loan transfer to contribution",
+	store.LedgerEntryTypeLoanToFineTransfer:         "Loan transfer to fine",
 }
 
 type statementEntry struct {

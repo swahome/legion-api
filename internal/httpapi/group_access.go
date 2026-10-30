@@ -55,6 +55,13 @@ func (s *Server) requireGroup(next http.Handler) http.Handler {
 
 		m, err := s.q.GetActiveMembership(ctx, store.GetActiveMembershipParams{GroupID: gid, UserID: claims.UserID})
 		switch {
+		case err == nil && claims.Admin:
+			a.MembershipID, a.IsOfficial, a.PlatformAdmin = &m.ID, true, true
+		case err == nil && (g.Status == store.GroupStatusSuspended || g.Status == store.GroupStatusClosed):
+			// Members of a suspended or closed group lose access; platform
+			// admins keep it so they can look into the group.
+			writeError(w, http.StatusForbidden, "group_suspended", "This group has been suspended. Contact support for help.")
+			return
 		case err == nil:
 			a.MembershipID, a.IsOfficial = &m.ID, m.IsOfficial
 		case errors.Is(err, pgx.ErrNoRows) && claims.Admin:

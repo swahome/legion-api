@@ -10,6 +10,7 @@ Every route below is under `/v1/groups/{groupID}` and needs a Bearer token.
 | Official (`memberships.is_official`) | All of the above for every member, plus the writes marked "official" |
 | Platform admin who isn't a member | The same as an official. This replaces the legacy "view group as admin" |
 | Anyone else, including suspended or removed members | `404 group_not_found`, so group ids can't be probed |
+| Members of a group a platform admin has suspended or closed | `403 group_suspended`. Platform admins still have access |
 
 Access is checked against `memberships` on every request. Demoting or removing
 someone takes effect immediately, without waiting for their token to expire.

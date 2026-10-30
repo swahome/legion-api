@@ -7,7 +7,7 @@
 | POST | `/v1/auth/login` | none | `{"identity": "<phone or email>", "password": "..."}` |
 | POST | `/v1/auth/refresh` | refresh cookie | Rotates the refresh token and returns a new access token |
 | POST | `/v1/auth/logout` | refresh cookie | Revokes the session (the whole refresh token family) |
-| GET | `/v1/me` | Bearer | User, platform roles, and group memberships (the group switcher) |
+| GET | `/v1/me` | Bearer | User, platform roles, group memberships (the group switcher) and the menus an admin switched off |
 | GET | `/healthz` | none | Database ping |
 
 Login and refresh both return:
