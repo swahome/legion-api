@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+
+	"github.com/swahome/legion-api/internal/store"
 )
 
 func (f *groupFixture) admin(method, tok, path string, body any) *httpResult {
@@ -183,5 +185,13 @@ func TestReferenceData(t *testing.T) {
 	rec = f.do("GET", "/v1/reference/counties?country_id="+fmt.Sprint(ke), nil, withBearer(f.memberTok))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("reference counties: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestEveryEntryTypeHasALabel(t *testing.T) {
+	for _, typ := range store.AllLedgerEntryTypeValues() {
+		if entryLabels[typ] == "" {
+			t.Errorf("no label for %s", typ)
+		}
 	}
 }
