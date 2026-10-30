@@ -19,6 +19,7 @@ var DumpTables = []string{
 	"contribution_member_pairings", "contribution_fine_settings", "statements",
 	"member_contributions_fines_balances",
 	"countries", "counties", "banks", "bank_branches", "settings",
+	"user_pin_access_token",
 }
 
 // Options control how legacy values are mapped.
@@ -37,6 +38,7 @@ type Plan struct {
 	Users, PlatformRoles, Groups, GroupRoles, Memberships            [][]any
 	Contributions, Schedules, ContributionMembers, FineRules, Ledger [][]any
 	Countries, Counties, Banks, BankBranches, Settings               [][]any
+	MobileTokens                                                     [][]any
 
 	Report Report
 }
@@ -159,6 +161,7 @@ func Transform(t Tables, roles []Row, opt Options, now time.Time) (*Plan, error)
 	banks := p.banks(t["banks"], now)
 	p.bankBranches(t["bank_branches"], banks, now)
 	p.settings(t["settings"])
+	p.mobileTokens(t["user_pin_access_token"], users, now)
 
 	for name, rows := range map[string][][]any{
 		"users": p.Users, "user_platform_roles": p.PlatformRoles, "groups": p.Groups,
@@ -167,6 +170,7 @@ func Transform(t Tables, roles []Row, opt Options, now time.Time) (*Plan, error)
 		"contribution_fine_rules": p.FineRules, "ledger_entries": p.Ledger,
 		"countries": p.Countries, "counties": p.Counties, "banks": p.Banks,
 		"bank_branches": p.BankBranches, "platform_settings": p.Settings,
+		"mobile_access_tokens": p.MobileTokens,
 	} {
 		p.Report.Imported[name] = len(rows)
 	}
@@ -174,7 +178,8 @@ func Transform(t Tables, roles []Row, opt Options, now time.Time) (*Plan, error)
 }
 
 var UserCols = []string{"id", "legacy_id", "first_name", "middle_name", "last_name", "email", "phone",
-	"id_number", "password_hash", "password_reset_required", "is_active", "last_login_at", "created_at", "updated_at"}
+	"id_number", "password_hash", "password_reset_required", "is_active", "last_login_at", "created_at", "updated_at",
+	"avatar", "is_validated"}
 
 func (p *Plan) users(rows []Row, opt Options, now time.Time) map[int64]bool {
 	ids := map[int64]bool{}
@@ -245,6 +250,7 @@ func (p *Plan) users(rows []Row, opt Options, now time.Time) map[int64]bool {
 			id, id, clean(r.Str("first_name")), clean(r.Str("middle_name")), clean(r.Str("last_name")),
 			email, phone, cleanPtr(r.Ptr("id_number")), hash, reset, r.Flag("active"),
 			epoch(r.Str("last_login")), created, timeOr(epoch(r.Str("modified_on")), created),
+			clean(r.Str("avatar")), r.Flag("is_validated"),
 		})
 		ids[id] = true
 	}

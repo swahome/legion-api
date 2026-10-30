@@ -28,6 +28,12 @@ type Config struct {
 
 	// MigrateOnStart applies pending goose migrations before serving.
 	MigrateOnStart bool
+
+	// MobileServerKey and MobileAppCert are the PEM files of the legacy
+	// mobile app's encryption (10.184.38.64.key and mobile.crt). The mobile
+	// app API is off unless both are set.
+	MobileServerKey string
+	MobileAppCert   string
 }
 
 // LoadEnvFile reads KEY=VALUE pairs from LEGION_ENV_FILE, or ./.env when
@@ -56,6 +62,8 @@ func Load() (Config, error) {
 		DatabaseURL:        os.Getenv("DATABASE_URL"),
 		JWTSecret:          []byte(os.Getenv("LEGION_JWT_SECRET")),
 		DefaultCallingCode: getenv("LEGION_DEFAULT_CALLING_CODE", "254"),
+		MobileServerKey:    os.Getenv("LEGION_MOBILE_SERVER_KEY"),
+		MobileAppCert:      os.Getenv("LEGION_MOBILE_APP_CERT"),
 	}
 	var err error
 	if c.AccessTTL, err = time.ParseDuration(getenv("LEGION_ACCESS_TTL", "15m")); err != nil {
@@ -72,6 +80,9 @@ func Load() (Config, error) {
 	}
 	if c.DatabaseURL == "" {
 		return c, errors.New("DATABASE_URL is required")
+	}
+	if (c.MobileServerKey == "") != (c.MobileAppCert == "") {
+		return c, errors.New("set both LEGION_MOBILE_SERVER_KEY and LEGION_MOBILE_APP_CERT, or neither")
 	}
 	if len(c.JWTSecret) < 32 {
 		return c, errors.New("LEGION_JWT_SECRET must be at least 32 bytes")

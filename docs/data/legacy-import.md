@@ -40,6 +40,8 @@ other command.
   needs them. The single legacy `settings` row becomes one `platform_settings` key
   per non-empty column, with integers stored as JSON numbers. Nothing is decrypted
   or encrypted: values are copied as they are.
+- **Keeps the mobile app signed in.** Live tokens in `user_pin_access_token`
+  move to `mobile_access_tokens` (hashed); expired ones and PINs are dropped.
 - **Reconciles balances.** For every member it recomputes the contribution balance in
   two ways and requires them to match to the cent:
   1. in Postgres, from `ledger_entries` joined to `ledger_entry_rules`;
@@ -86,6 +88,7 @@ imported rows:
   banks                           65
   bank_branches                 1936
   platform_settings               34
+  mobile_access_tokens             0
 data issues (rows):
        36  contribution_schedules: regular with no frequency
         1  countries: invalid currency or calling code, skipped

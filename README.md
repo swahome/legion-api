@@ -93,5 +93,6 @@ goose -dir db/migrations postgres "$DATABASE_URL" up
 ```
 
 Schema design and the legacy mapping for each slice are in `docs/schema/`.
-Auth behaviour is described in `docs/api/auth.md`, and the group endpoints in
-`docs/api/groups.md`.
+Auth behaviour is described in `docs/api/auth.md`, the group endpoints in
+`docs/api/groups.md`, the platform admin in `docs/api/admin.md`, and the legacy
+mobile app API in `docs/api/mobile.md`.

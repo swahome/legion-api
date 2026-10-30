@@ -21,6 +21,7 @@ type Server struct {
 	auth               *auth.Service
 	cookieSecure       bool
 	defaultCallingCode string
+	mobile             http.Handler
 }
 
 func New(pool *pgxpool.Pool, authSvc *auth.Service, cookieSecure bool) *Server {
@@ -28,6 +29,13 @@ func New(pool *pgxpool.Pool, authSvc *auth.Service, cookieSecure bool) *Server {
 		pool: pool, q: store.New(pool), auth: authSvc, cookieSecure: cookieSecure,
 		defaultCallingCode: authSvc.DefaultCallingCode(),
 	}
+}
+
+// WithMobile serves the legacy mobile app API under /v1/legacy, so the
+// app's base URL becomes https://<host>/v1/legacy/.
+func (s *Server) WithMobile(h http.Handler) *Server {
+	s.mobile = h
+	return s
 }
 
 func (s *Server) Routes() http.Handler {
@@ -41,6 +49,9 @@ func (s *Server) Routes() http.Handler {
 	r.Get("/healthz", s.health)
 
 	r.Route("/v1", func(r chi.Router) {
+		if s.mobile != nil {
+			r.Mount("/legacy", s.mobile)
+		}
 		r.Route("/auth", func(r chi.Router) {
 			r.Post("/login", s.login)
 			r.Post("/refresh", s.refresh)

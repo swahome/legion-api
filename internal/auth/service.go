@@ -84,39 +84,54 @@ type Session struct {
 }
 
 func (s *Service) Login(ctx context.Context, rawIdentity, password string, c ClientInfo) (Session, error) {
+	user, err := s.Authenticate(ctx, rawIdentity, password, c)
+	if err != nil {
+		return Session{}, err
+	}
+	return s.startSession(ctx, s.q, user, uuid.New(), c)
+}
+
+// Authenticate checks a password with the login throttle, without starting
+// a web session. The mobile app API issues its own tokens.
+func (s *Service) Authenticate(ctx context.Context, rawIdentity, password string, c ClientInfo) (store.User, error) {
 	id, err := ParseIdentity(rawIdentity, s.defaultCC)
 	if err != nil {
-		return Session{}, ErrInvalidCredentials
+		return store.User{}, ErrInvalidCredentials
 	}
 	if err := s.checkThrottle(ctx, id.Key(), c.IP); err != nil {
-		return Session{}, err
+		return store.User{}, err
 	}
 
 	user, err := s.lookup(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		_ = bcrypt.CompareHashAndPassword(dummyHash, []byte(password))
-		return Session{}, s.failAttempt(ctx, id.Key(), c.IP)
+		return store.User{}, s.failAttempt(ctx, id.Key(), c.IP)
 	}
 	if err != nil {
-		return Session{}, err
+		return store.User{}, err
 	}
 	if user.PasswordResetRequired || user.PasswordHash == nil {
-		return Session{}, ErrPasswordResetRequired
+		return store.User{}, ErrPasswordResetRequired
 	}
 	if bcrypt.CompareHashAndPassword([]byte(*user.PasswordHash), []byte(password)) != nil {
-		return Session{}, s.failAttempt(ctx, id.Key(), c.IP)
+		return store.User{}, s.failAttempt(ctx, id.Key(), c.IP)
 	}
 	if !user.IsActive {
-		return Session{}, ErrAccountInactive
+		return store.User{}, ErrAccountInactive
 	}
 
 	if err := s.q.ClearLoginAttempts(ctx, store.ClearLoginAttemptsParams{Identity: id.Key(), IpAddress: c.IP}); err != nil {
-		return Session{}, err
+		return store.User{}, err
 	}
 	if err := s.q.TouchLastLogin(ctx, user.ID); err != nil {
-		return Session{}, err
+		return store.User{}, err
 	}
-	return s.startSession(ctx, s.q, user, uuid.New(), c)
+	return user, nil
+}
+
+// LookupIdentity finds the user for a phone number or email address.
+func (s *Service) LookupIdentity(ctx context.Context, id Identity) (store.User, error) {
+	return s.lookup(ctx, id)
 }
 
 // Refresh rotates a refresh token. Presenting a token that was already
