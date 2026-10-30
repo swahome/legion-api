@@ -42,6 +42,34 @@ The binary reads `./.env` from its working directory, or the file named by
 `LEGION_ENV_FILE`. Real environment variables override the file. See
 `.env.example` for every setting.
 
+### Running behind the web server
+
+The API is meant to sit behind the same web server that serves legion-web, on
+the same host but its own port. For example, the site is `https://legion.com`
+and the API listens on port 8089:
+
+- The web server forwards `https://legion.com/v1/*` to `http://127.0.0.1:8089`
+  and serves the legion-web build for everything else.
+- The browser only ever talks to `https://legion.com`. That keeps the refresh
+  token cookie (HttpOnly, `SameSite=Strict`, path `/v1/auth`) on the site's own
+  origin, so it is sent on refresh.
+
+Set these in the API's `.env`:
+
+```sh
+LEGION_ADDR=127.0.0.1:8089   # loopback only, never exposed to the internet
+LEGION_COOKIE_SECURE=true    # the site is served over HTTPS
+```
+
+**Bind to loopback.** The API reads the client IP from `X-Forwarded-For` /
+`X-Real-IP`, and the login lockout counts failed attempts per IP. If the API
+port were reachable from the internet, a client could send a fake
+`X-Forwarded-For` and get around the lockout. Only the proxy should be able to
+reach it, and the proxy must set those headers. Caddy does this by default.
+With nginx, add `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`.
+
+The legion-web README has a full Caddy example.
+
 ## Layout
 
 ```
