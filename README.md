@@ -34,6 +34,7 @@ the binary and a `.env` file to the server:
 ./legion-api migrate        # apply migrations (or set LEGION_MIGRATE_ON_START=true)
 ./legion-api                # serve
 ./legion-api create-user -phone 0700000001 -password ... -admin
+./legion-api import-legacy -dump chamasoft.sql   # see docs/data/legacy-import.md
 ./legion-api version
 ```
 
@@ -44,12 +45,13 @@ The binary reads `./.env` from its working directory, or the file named by
 ## Layout
 
 ```
-cmd/legion-api   the binary: serve, migrate, create-user, version
+cmd/legion-api   the binary: serve, migrate, create-user, import-legacy, version
 db/migrations    goose SQL migrations (embedded)
 db/queries       sqlc query files
 internal/auth    login, throttling, tokens, refresh rotation
 internal/config  .env and environment settings
 internal/httpapi chi routes and handlers
+internal/legacy  MySQL dump reader and the legacy data import
 internal/store   sqlc generated code (do not edit; run `make generate`)
 docs/            schema mapping and API notes
 ```

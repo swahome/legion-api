@@ -58,7 +58,7 @@ From `Transactions::$statement_transaction_names`, with row counts from the dump
 | 12, 13, 14, 16 | fine_payment | 356 |
 | 17–20 | misc_payment | 415 |
 | 21–24 | contribution_refund | 403 |
-| 25 / 26 | contribution_transfer_in / _out | 967 |
+| 25 / 26 | contribution_transfer_out / _in | 967 |
 | 27 | contribution_transfer_out (to another contribution) | 1 |
 | 28 | contribution_to_fine_transfer | 1 |
 | 29 | loan_to_contribution_transfer | 1 |
@@ -100,11 +100,14 @@ These need decisions in the ETL (step 3). None of them block the schema.
    `member_contributions_fines_balances.*`), so cents are lost. We'll recompute from
    entries and compare totals as an ETL check.
 
-## Open questions for step 3
+## Resolved in step 3
 
-- **Sign of transfer entries (25–30).** The legacy code computes balances per type.
-  I'll confirm each sign against `Statements_m` balance functions before writing the
-  ETL, and add a test that recomputed balances match legacy totals for every member.
+- **Sign of each entry type** is defined in `ledger_entry_rules` (migration `00003`),
+  taken from the legacy `Statements_m` balance functions. The import checks every
+  member's balance against the legacy algorithm. See `docs/data/legacy-import.md`.
+
+## Still open
+
 - **Invoicing engine.** This slice shows schedules and statements but doesn't
   generate invoices. Porting `Contribution_invoices` (the cron that creates type-1
   entries) is its own slice.
