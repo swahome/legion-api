@@ -66,6 +66,9 @@ func NewService(pool *pgxpool.Pool, tokens *TokenIssuer, refreshTTL time.Duratio
 
 func (s *Service) Tokens() *TokenIssuer { return s.tokens }
 
+// DefaultCallingCode is the calling code used to normalise local phone numbers.
+func (s *Service) DefaultCallingCode() string { return s.defaultCC }
+
 // ClientInfo describes the caller, for throttling and the refresh token audit trail.
 type ClientInfo struct {
 	IP        *netip.Addr

@@ -16,14 +16,18 @@ import (
 )
 
 type Server struct {
-	pool         *pgxpool.Pool
-	q            *store.Queries
-	auth         *auth.Service
-	cookieSecure bool
+	pool               *pgxpool.Pool
+	q                  *store.Queries
+	auth               *auth.Service
+	cookieSecure       bool
+	defaultCallingCode string
 }
 
 func New(pool *pgxpool.Pool, authSvc *auth.Service, cookieSecure bool) *Server {
-	return &Server{pool: pool, q: store.New(pool), auth: authSvc, cookieSecure: cookieSecure}
+	return &Server{
+		pool: pool, q: store.New(pool), auth: authSvc, cookieSecure: cookieSecure,
+		defaultCallingCode: authSvc.DefaultCallingCode(),
+	}
 }
 
 func (s *Server) Routes() http.Handler {
@@ -45,6 +49,28 @@ func (s *Server) Routes() http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
 			r.Get("/me", s.me)
+
+			r.Route("/groups/{groupID}", func(r chi.Router) {
+				r.Use(s.requireGroup)
+				r.Get("/", s.getGroup)
+				r.Get("/roles", s.listRoles)
+
+				r.Get("/members", s.listMembers)
+				r.Get("/members/{memberID}", s.getMember)
+				r.Get("/members/{memberID}/statement", s.memberStatement)
+
+				r.Get("/contributions", s.listContributions)
+				r.Get("/contributions/{contributionID}", s.getContribution)
+
+				r.Group(func(r chi.Router) {
+					r.Use(requireOfficial)
+					r.Post("/members", s.addMember)
+					r.Patch("/members/{memberID}", s.updateMember)
+					r.Post("/contributions", s.createContribution)
+					r.Patch("/contributions/{contributionID}", s.updateContribution)
+					r.Get("/contribution-balances", s.contributionBalances)
+				})
+			})
 		})
 	})
 	return r
