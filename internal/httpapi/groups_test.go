@@ -334,6 +334,10 @@ func TestMemberStatement(t *testing.T) {
 	if r.body["closing_balance"] != "799.50" || r.body["opening_balance"] != "0.00" {
 		t.Errorf("balances: %s", r.raw)
 	}
+	// Totals must leave the hidden contribution out too, or they leak it.
+	if totals := r.list("totals"); len(totals) != 1 || totals[0]["balance"] != "799.50" {
+		t.Errorf("member totals: %v", totals)
+	}
 
 	// Date window: opening balance carries everything before it.
 	r = f.get(f.memberTok, path+"?from=2026-02-01&to=2026-02-28")
@@ -347,7 +351,7 @@ func TestMemberStatement(t *testing.T) {
 	// Officials also see the hidden contribution.
 	r = f.get(f.officialTok, path)
 	expect(t, r, 200)
-	if len(r.list("entries")) != 6 || r.body["closing_balance"] != "1099.50" {
+	if len(r.list("entries")) != 6 || r.body["closing_balance"] != "1099.50" || len(r.list("totals")) != 2 {
 		t.Errorf("official view: %s", r.raw)
 	}
 

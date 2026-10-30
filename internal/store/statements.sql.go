@@ -156,14 +156,17 @@ SELECT e.contribution_id, c.name AS contribution_name,
 FROM ledger_entries e
 JOIN ledger_entry_rules r USING (entry_type)
 LEFT JOIN contributions c ON c.id = e.contribution_id
-WHERE e.group_id = $1 AND e.membership_id = $2 AND e.voided_at IS NULL AND r.bucket = 'contribution'
+WHERE e.group_id = $1 AND e.membership_id = $2
+  AND e.voided_at IS NULL AND r.bucket = 'contribution'
+  AND (c.id IS NULL OR NOT c.hidden_in_statement OR $3::bool)
 GROUP BY e.contribution_id, c.name
 ORDER BY c.name NULLS LAST
 `
 
 type MemberContributionTotalsParams struct {
-	GroupID      int64
-	MembershipID *int64
+	GroupID       int64
+	MembershipID  *int64
+	IncludeHidden bool
 }
 
 type MemberContributionTotalsRow struct {
@@ -175,8 +178,9 @@ type MemberContributionTotalsRow struct {
 }
 
 // Per-contribution totals for one member: invoiced, paid and balance.
+// Members don't see contributions hidden from statements; officials do.
 func (q *Queries) MemberContributionTotals(ctx context.Context, arg MemberContributionTotalsParams) ([]MemberContributionTotalsRow, error) {
-	rows, err := q.db.Query(ctx, memberContributionTotals, arg.GroupID, arg.MembershipID)
+	rows, err := q.db.Query(ctx, memberContributionTotals, arg.GroupID, arg.MembershipID, arg.IncludeHidden)
 	if err != nil {
 		return nil, err
 	}

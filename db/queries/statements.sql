@@ -22,6 +22,7 @@ ORDER BY entry_date, id;
 
 -- name: MemberContributionTotals :many
 -- Per-contribution totals for one member: invoiced, paid and balance.
+-- Members don't see contributions hidden from statements; officials do.
 SELECT e.contribution_id, c.name AS contribution_name,
        coalesce(sum(e.amount) FILTER (WHERE r.sign > 0), 0)::text AS payable,
        coalesce(sum(e.amount) FILTER (WHERE r.sign < 0), 0)::text AS paid,
@@ -29,7 +30,9 @@ SELECT e.contribution_id, c.name AS contribution_name,
 FROM ledger_entries e
 JOIN ledger_entry_rules r USING (entry_type)
 LEFT JOIN contributions c ON c.id = e.contribution_id
-WHERE e.group_id = $1 AND e.membership_id = $2 AND e.voided_at IS NULL AND r.bucket = 'contribution'
+WHERE e.group_id = sqlc.arg(group_id) AND e.membership_id = sqlc.arg(membership_id)
+  AND e.voided_at IS NULL AND r.bucket = 'contribution'
+  AND (c.id IS NULL OR NOT c.hidden_in_statement OR sqlc.arg(include_hidden)::bool)
 GROUP BY e.contribution_id, c.name
 ORDER BY c.name NULLS LAST;
 

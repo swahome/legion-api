@@ -142,7 +142,9 @@ func (s *Server) memberStatement(w http.ResponseWriter, r *http.Request) {
 		resp.ClosingBalance = se.Balance
 	}
 
-	totals, err := s.q.MemberContributionTotals(ctx, store.MemberContributionTotalsParams{GroupID: a.Group.ID, MembershipID: &mid})
+	totals, err := s.q.MemberContributionTotals(ctx, store.MemberContributionTotalsParams{
+		GroupID: a.Group.ID, MembershipID: &mid, IncludeHidden: a.IsOfficial,
+	})
 	if err != nil {
 		writeInternal(w, r, err)
 		return
