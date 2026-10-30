@@ -50,6 +50,27 @@ used, as before.
 | `mobile/generate_pin`, `mobile/resend_pin` | Send a 4-digit PIN. No SMS sender is configured until milestone 5, so for now these answer "Error occured sending pin" |
 | `mobile/verify_pin` | Trades the PIN for a token. For a number with no account it returns `user_exists: 0` and the `unique_code` that sign-up needs |
 | `mobile/get_user_checkin_data` | The user and their groups, with role, activation status and currency |
+| `mobile/get_group_data` | The check-in data for one group |
+| `mobile/countries/get_country_options`, `get_currency_options` | Active countries, and their currency names |
+| `mobile/banks/get_bank_options` | Active banks, without e-wallets |
+| `mobile/bank_branches/get_bank_branches_options` | Branches of `bank_id`; a non-numeric id answers "Request submitted is invalid" |
+| `mobile/group_roles/group_roles_list` | The group's roles, with `in_use` when an active member holds one. Paged by `lower_limit`/`upper_limit` |
+| `mobile/members/get_members_and_details` | Members and suspended members, with totals when `show_full_details` is on (the default). Honours member information privacy |
+| `mobile/members/get_group_member_options` | Active members for pickers. Honours member information privacy |
+| `mobile/contributions/get_group_contributions` | Every contribution, with its type, schedule text and next dates |
+| `mobile/contributions/get_group_contribution` | One contribution (`id`) with its schedule under the legacy column names, its fines and its members |
+| `mobile/contributions/get_group_contribution_options`, `get_member_contribution_options` | Active, visible contributions; the member version adds the caller's balance on each |
+| `mobile/statements/contribution_statement` | The last six months of a member's contribution statement (`member_id`, or the caller) |
+| `mobile/get_member_dashboard_data`, `get_group_dashboard_data`, `get_group_member_contribution_summary` | Dashboard totals from the ledger |
+
+Group actions check the user (status 4), the group (status 5) and the caller's membership (status 6, or 0 where the old action used 0), and record the user as seen, as before. Two things differ:
+
+- Suspended and closed groups count as not found (status 5), as on the web.
+- The contribution statement only shows members of the caller's group. The old one would show a member of any group.
+
+**Totals.** Contributions paid are payments and transfers in, less refunds, transfers out (including to fines) and transfers to loans, plus loan repayments moved into a contribution. Fines paid include contributions and loan repayments moved to fines. Arrears are the contribution and fine balances, or 0 when the group disables arrears.
+
+**Not there yet.** Until milestones 3 and 4 port deposits, expenses, accounts and loans, these come back as 0 or empty in the shapes the app expects: loan balances, expenses, bank and cash balances, recent transactions, notification and unreconciled counts. Groups that disable arrears got a deposits-only statement in the old app; for now they get the regular contribution statement.
 
 The other actions answer HTTP 404 until their milestone ports them.
 

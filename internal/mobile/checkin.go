@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	"github.com/swahome/legion-api/internal/store"
 )
@@ -23,11 +24,15 @@ var groupFields = []string{
 }
 
 // checkinData is the legacy _get_checkin_data: the user's groups with their
-// role and activation details. Invitations come with sign-up (milestone 5).
-func (s *Server) checkinData(ctx context.Context, userID int64) (map[string]any, error) {
+// role and activation details, or only the given groups. Invitations come
+// with sign-up (milestone 5).
+func (s *Server) checkinData(ctx context.Context, userID int64, only ...int64) (map[string]any, error) {
 	rows, err := s.q.MobileUserGroups(ctx, userID)
 	if err != nil {
 		return nil, err
+	}
+	if len(only) > 0 {
+		rows = slices.DeleteFunc(rows, func(g store.MobileUserGroupsRow) bool { return !slices.Contains(only, g.ID) })
 	}
 	ids := make([]int64, len(rows))
 	for i, g := range rows {
