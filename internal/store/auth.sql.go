@@ -91,7 +91,7 @@ func (q *Queries) CreateRefreshToken(ctx context.Context, arg CreateRefreshToken
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (first_name, last_name, email, phone, password_hash)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, legacy_id, first_name, middle_name, last_name, email, phone, id_number, password_hash, password_reset_required, is_active, last_login_at, created_at, updated_at
+RETURNING id, legacy_id, first_name, middle_name, last_name, email, phone, id_number, password_hash, password_reset_required, is_active, last_login_at, created_at, updated_at, avatar, is_validated
 `
 
 type CreateUserParams struct {
@@ -126,6 +126,8 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.LastLoginAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Avatar,
+		&i.IsValidated,
 	)
 	return i, err
 }
@@ -152,7 +154,7 @@ func (q *Queries) GetRefreshTokenByHash(ctx context.Context, tokenHash []byte) (
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, legacy_id, first_name, middle_name, last_name, email, phone, id_number, password_hash, password_reset_required, is_active, last_login_at, created_at, updated_at FROM users WHERE lower(email) = lower($1)
+SELECT id, legacy_id, first_name, middle_name, last_name, email, phone, id_number, password_hash, password_reset_required, is_active, last_login_at, created_at, updated_at, avatar, is_validated FROM users WHERE lower(email) = lower($1)
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -173,12 +175,14 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.LastLoginAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Avatar,
+		&i.IsValidated,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, legacy_id, first_name, middle_name, last_name, email, phone, id_number, password_hash, password_reset_required, is_active, last_login_at, created_at, updated_at FROM users WHERE id = $1
+SELECT id, legacy_id, first_name, middle_name, last_name, email, phone, id_number, password_hash, password_reset_required, is_active, last_login_at, created_at, updated_at, avatar, is_validated FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
@@ -199,12 +203,14 @@ func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
 		&i.LastLoginAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Avatar,
+		&i.IsValidated,
 	)
 	return i, err
 }
 
 const getUserByPhone = `-- name: GetUserByPhone :one
-SELECT id, legacy_id, first_name, middle_name, last_name, email, phone, id_number, password_hash, password_reset_required, is_active, last_login_at, created_at, updated_at FROM users WHERE phone = $1
+SELECT id, legacy_id, first_name, middle_name, last_name, email, phone, id_number, password_hash, password_reset_required, is_active, last_login_at, created_at, updated_at, avatar, is_validated FROM users WHERE phone = $1
 `
 
 func (q *Queries) GetUserByPhone(ctx context.Context, phone *string) (User, error) {
@@ -225,6 +231,8 @@ func (q *Queries) GetUserByPhone(ctx context.Context, phone *string) (User, erro
 		&i.LastLoginAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Avatar,
+		&i.IsValidated,
 	)
 	return i, err
 }

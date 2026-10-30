@@ -784,6 +784,25 @@ type Membership struct {
 	Profile          []byte
 }
 
+type MobileAccessToken struct {
+	TokenHash  []byte
+	LegacyID   *int32
+	UserID     int64
+	CreatedAt  time.Time
+	ExpiresAt  time.Time
+	LastUsedAt *time.Time
+}
+
+type MobilePin struct {
+	Identity   string
+	PinHash    []byte
+	UniqueCode string
+	Attempts   int32
+	ExpiresAt  time.Time
+	VerifiedAt *time.Time
+	CreatedAt  time.Time
+}
+
 type PlatformSetting struct {
 	Key       string
 	Value     []byte
@@ -818,6 +837,8 @@ type User struct {
 	LastLoginAt           *time.Time
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
+	Avatar                string
+	IsValidated           bool
 }
 
 type UserPlatformRole struct {

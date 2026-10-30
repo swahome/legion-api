@@ -1,6 +1,7 @@
 package legacy
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -203,5 +204,32 @@ func (p *Plan) settings(rows []Row) {
 			b, _ = json.Marshal(s)
 		}
 		p.Settings = append(p.Settings, []any{strings.ToLower(k), b})
+	}
+}
+
+var MobileTokenCols = []string{"token_hash", "legacy_id", "user_id", "created_at", "expires_at"}
+
+// mobileTokens carries over the mobile app's live sessions, so the app
+// stays signed in through the switch. Only the token's SHA-256 is kept;
+// PINs are not imported (a fresh one is sent on the next PIN sign-in).
+func (p *Plan) mobileTokens(rows []Row, users map[int64]bool, now time.Time) {
+	seen := map[string]bool{}
+	for _, r := range byID(rows) {
+		token := strings.Trim(clean(r.Str("access_token")), `"`)
+		expires := epoch(r.Str("access_token_expire_on"))
+		switch {
+		case token == "" || expires == nil || !expires.After(now):
+			continue // signed out or expired: nothing to carry over
+		case !users[r.Int("user_id")]:
+			p.Report.issue("user_pin_access_token: user missing, skipped")
+			continue
+		case seen[token]:
+			p.Report.issue("user_pin_access_token: duplicate token, skipped")
+			continue
+		}
+		seen[token] = true
+		h := sha256.Sum256([]byte(token))
+		p.MobileTokens = append(p.MobileTokens, []any{h[:], r.Int("id"), r.Int("user_id"),
+			timeOr(epoch(r.Str("access_token_created_on")), now), *expires})
 	}
 }

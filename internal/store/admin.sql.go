@@ -15,7 +15,7 @@ import (
 const adminCreateUser = `-- name: AdminCreateUser :one
 INSERT INTO users (first_name, middle_name, last_name, email, phone, id_number, password_hash, password_reset_required)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, legacy_id, first_name, middle_name, last_name, email, phone, id_number, password_hash, password_reset_required, is_active, last_login_at, created_at, updated_at
+RETURNING id, legacy_id, first_name, middle_name, last_name, email, phone, id_number, password_hash, password_reset_required, is_active, last_login_at, created_at, updated_at, avatar, is_validated
 `
 
 type AdminCreateUserParams struct {
@@ -56,6 +56,8 @@ func (q *Queries) AdminCreateUser(ctx context.Context, arg AdminCreateUserParams
 		&i.LastLoginAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Avatar,
+		&i.IsValidated,
 	)
 	return i, err
 }
@@ -339,7 +341,7 @@ UPDATE users SET
     is_active   = coalesce($9, is_active),
     updated_at  = now()
 WHERE id = $10
-RETURNING id, legacy_id, first_name, middle_name, last_name, email, phone, id_number, password_hash, password_reset_required, is_active, last_login_at, created_at, updated_at
+RETURNING id, legacy_id, first_name, middle_name, last_name, email, phone, id_number, password_hash, password_reset_required, is_active, last_login_at, created_at, updated_at, avatar, is_validated
 `
 
 type AdminUpdateUserParams struct {
@@ -384,6 +386,8 @@ func (q *Queries) AdminUpdateUser(ctx context.Context, arg AdminUpdateUserParams
 		&i.LastLoginAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Avatar,
+		&i.IsValidated,
 	)
 	return i, err
 }

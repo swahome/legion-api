@@ -28,6 +28,7 @@ import (
 	"github.com/swahome/legion-api/internal/database"
 	"github.com/swahome/legion-api/internal/httpapi"
 	"github.com/swahome/legion-api/internal/legacy"
+	"github.com/swahome/legion-api/internal/mobile"
 	"github.com/swahome/legion-api/internal/store"
 )
 
@@ -85,9 +86,18 @@ func serve() error {
 	}
 
 	authSvc := auth.NewService(pool, auth.NewTokenIssuer(cfg.JWTSecret, cfg.AccessTTL), cfg.RefreshTTL, cfg.DefaultCallingCode)
+	api := httpapi.New(pool, authSvc, cfg.CookieSecure)
+	if cfg.MobileServerKey != "" {
+		keys, err := mobile.LoadKeys(cfg.MobileServerKey, cfg.MobileAppCert)
+		if err != nil {
+			return err
+		}
+		api.WithMobile(mobile.New(pool, keys, authSvc, nil).Routes())
+		slog.Info("mobile app API on /v1/legacy")
+	}
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           httpapi.New(pool, authSvc, cfg.CookieSecure).Routes(),
+		Handler:           api.Routes(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      35 * time.Second,
