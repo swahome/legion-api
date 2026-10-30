@@ -5,6 +5,7 @@
 //	legion-api                 serve the API (same as "serve")
 //	legion-api migrate         apply pending database migrations
 //	legion-api create-user     create a user, e.g. a first admin
+//	legion-api import-legacy   load the LegionCore MySQL dump
 //	legion-api version
 package main
 
@@ -26,6 +27,7 @@ import (
 	"github.com/swahome/legion-api/internal/config"
 	"github.com/swahome/legion-api/internal/database"
 	"github.com/swahome/legion-api/internal/httpapi"
+	"github.com/swahome/legion-api/internal/legacy"
 	"github.com/swahome/legion-api/internal/store"
 )
 
@@ -49,8 +51,10 @@ func main() {
 		err = migrate()
 	case "create-user":
 		err = createUser(args)
+	case "import-legacy":
+		err = importLegacy(args)
 	default:
-		err = fmt.Errorf("unknown command %q (want serve, migrate, create-user or version)", cmd)
+		err = fmt.Errorf("unknown command %q (want serve, migrate, create-user, import-legacy or version)", cmd)
 	}
 	if err != nil {
 		slog.Error("fatal", "cmd", cmd, "err", err)
@@ -188,5 +192,73 @@ func createUser(args []string) error {
 		}
 	}
 	fmt.Printf("created user %d\n", u.ID)
+	return nil
+}
+
+// importLegacy loads a LegionCore MySQL dump into DATABASE_URL and checks
+// the result. It is the cutover data migration, so it is safe to re-run:
+// with -replace it wipes the imported tables and loads them again.
+//
+//	legion-api import-legacy -dump anonymized_db.sql -users-groups users_groups.sql -synthetic-phones -replace
+func importLegacy(args []string) error {
+	fs := flag.NewFlagSet("import-legacy", flag.ContinueOnError)
+	dump := fs.String("dump", "", "path to the legacy MySQL dump (.sql)")
+	usersGroups := fs.String("users-groups", "", "separate dump holding users_groups, if the main dump's is unusable")
+	synthetic := fs.Bool("synthetic-phones", false, "give every user a fake phone +2547000NNNNN from their id (anonymized dumps only)")
+	replace := fs.Bool("replace", false, "wipe users, groups, memberships, contributions and the ledger before loading")
+	dryRun := fs.Bool("dry-run", false, "parse and transform only; print the report without writing")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *dump == "" {
+		return errors.New("-dump is required")
+	}
+	if err := config.LoadEnvFile(); err != nil {
+		return err
+	}
+
+	start := time.Now()
+	tables, err := legacy.ReadDump(*dump, legacy.DumpTables...)
+	if err != nil {
+		return err
+	}
+	roles := tables["users_groups"]
+	if *usersGroups != "" {
+		ug, err := legacy.ReadDump(*usersGroups, "users_groups")
+		if err != nil {
+			return err
+		}
+		roles = ug["users_groups"]
+	}
+	cc := os.Getenv("LEGION_DEFAULT_CALLING_CODE")
+	plan, err := legacy.Transform(tables, roles, legacy.Options{SyntheticPhones: *synthetic, DefaultCallingCode: cc}, time.Now())
+	if err != nil {
+		return err
+	}
+	plan.Report.Write(os.Stdout)
+	if *dryRun {
+		return nil
+	}
+
+	ctx := context.Background()
+	pool, err := database.Open(ctx, os.Getenv("DATABASE_URL"))
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	if err := database.Migrate(ctx, pool); err != nil {
+		return err
+	}
+	if err := legacy.Load(ctx, pool, plan, *replace); err != nil {
+		return err
+	}
+	mismatches, err := legacy.Reconcile(ctx, pool, tables, os.Stdout)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("done in %s\n", time.Since(start).Round(time.Millisecond))
+	if mismatches > 0 {
+		return fmt.Errorf("%d contribution balances differ from the legacy calculation", mismatches)
+	}
 	return nil
 }

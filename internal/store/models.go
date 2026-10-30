@@ -484,12 +484,20 @@ type LedgerEntry struct {
 	MembershipID   *int64
 	ContributionID *int64
 	EntryType      LedgerEntryType
-	Amount         pgtype.Numeric
-	EntryDate      time.Time
-	DueDate        *time.Time
-	Description    string
-	VoidedAt       *time.Time
-	CreatedAt      time.Time
+	// Always positive; see ledger_entry_rules for the effect on balances
+	Amount      pgtype.Numeric
+	EntryDate   time.Time
+	DueDate     *time.Time
+	Description string
+	VoidedAt    *time.Time
+	CreatedAt   time.Time
+	IsBackdated bool
+}
+
+type LedgerEntryRule struct {
+	EntryType LedgerEntryType
+	Bucket    string
+	Sign      int16
 }
 
 type LoginAttempt struct {
