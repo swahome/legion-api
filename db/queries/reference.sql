@@ -105,3 +105,6 @@ ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.up
 
 -- name: DeletePlatformSetting :exec
 DELETE FROM platform_settings WHERE key = $1;
+
+-- name: GetPlatformSetting :one
+SELECT value FROM platform_settings WHERE key = $1;

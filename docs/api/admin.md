@@ -46,6 +46,10 @@ change would leave no active admin.
 | GET | `/admin/settings` | All settings as one JSON object |
 | PATCH | `/admin/settings` | Merges keys into the settings; a `null` value removes the key. Keys use lowercase letters, digits, `_` and dots. Returns the full settings |
 
+Menus are fixed in the web app. Admins switch items off with the
+`menus.disabled` setting, a list of menu ids such as `["group.arrears", "member.members"]`.
+`GET /v1/me` returns it to every user as `disabled_menus`.
+
 The import fills the settings from the legacy `settings` row, keyed by its column
 names (`application_name`, `allow_self_onboarding`, and so on).
 

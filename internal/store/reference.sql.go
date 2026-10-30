@@ -233,6 +233,17 @@ func (q *Queries) GetCountry(ctx context.Context, id int64) (Country, error) {
 	return i, err
 }
 
+const getPlatformSetting = `-- name: GetPlatformSetting :one
+SELECT value FROM platform_settings WHERE key = $1
+`
+
+func (q *Queries) GetPlatformSetting(ctx context.Context, key string) ([]byte, error) {
+	row := q.db.QueryRow(ctx, getPlatformSetting, key)
+	var value []byte
+	err := row.Scan(&value)
+	return value, err
+}
+
 const listBankBranches = `-- name: ListBankBranches :many
 SELECT id, legacy_id, bank_id, name, code, is_active, created_at, updated_at FROM bank_branches
 WHERE bank_id = $1

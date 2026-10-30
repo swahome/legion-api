@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -48,7 +49,13 @@ type meResponse struct {
 	User          userResponse         `json:"user"`
 	PlatformRoles []string             `json:"platform_roles"`
 	Memberships   []membershipResponse `json:"memberships"`
+	// DisabledMenus lists the menu items a platform admin switched off,
+	// like "group.arrears". The menus themselves are fixed in the web app.
+	DisabledMenus []string `json:"disabled_menus"`
 }
+
+// disabledMenusKey is the platform setting that holds the switched-off menus.
+const disabledMenusKey = "menus.disabled"
 
 // me returns the signed-in user, their platform roles and every group they
 // belong to. The web app uses the memberships list as its group switcher.
@@ -94,6 +101,14 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 			RoleName:     m.RoleName,
 			Status:       string(m.Status),
 		})
+	}
+	resp.DisabledMenus = []string{}
+	if v, err := s.q.GetPlatformSetting(ctx, disabledMenusKey); err == nil {
+		// A malformed value leaves every menu on.
+		_ = json.Unmarshal(v, &resp.DisabledMenus)
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		writeInternal(w, r, err)
+		return
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

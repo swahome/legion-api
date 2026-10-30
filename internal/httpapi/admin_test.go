@@ -195,3 +195,16 @@ func TestEveryEntryTypeHasALabel(t *testing.T) {
 		}
 	}
 }
+
+func TestDisabledMenusInMe(t *testing.T) {
+	f := newGroupFixture(t)
+	r := f.admin("GET", f.memberTok, "/me", nil)
+	if m := r.body["disabled_menus"].([]any); len(m) != 0 {
+		t.Fatalf("want no disabled menus: %s", r.raw)
+	}
+	expect(t, f.admin("PATCH", f.adminTok, "/admin/settings", map[string]any{"menus.disabled": []string{"group.arrears"}}), http.StatusOK)
+	r = f.admin("GET", f.memberTok, "/me", nil)
+	if m := r.body["disabled_menus"].([]any); len(m) != 1 || m[0] != "group.arrears" {
+		t.Fatalf("disabled menus: %s", r.raw)
+	}
+}
