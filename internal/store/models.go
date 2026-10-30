@@ -60,6 +60,30 @@ func (ns NullContributionCategory) Value() (driver.Value, error) {
 	return string(ns.ContributionCategory), nil
 }
 
+func (e ContributionCategory) Valid() bool {
+	switch e {
+	case ContributionCategoryShareCapital,
+		ContributionCategorySavings,
+		ContributionCategoryWelfare,
+		ContributionCategoryMembershipFee,
+		ContributionCategoryInvestment,
+		ContributionCategoryOther:
+		return true
+	}
+	return false
+}
+
+func AllContributionCategoryValues() []ContributionCategory {
+	return []ContributionCategory{
+		ContributionCategoryShareCapital,
+		ContributionCategorySavings,
+		ContributionCategoryWelfare,
+		ContributionCategoryMembershipFee,
+		ContributionCategoryInvestment,
+		ContributionCategoryOther,
+	}
+}
+
 type ContributionFrequency string
 
 const (
@@ -109,6 +133,36 @@ func (ns NullContributionFrequency) Value() (driver.Value, error) {
 	return string(ns.ContributionFrequency), nil
 }
 
+func (e ContributionFrequency) Valid() bool {
+	switch e {
+	case ContributionFrequencyDaily,
+		ContributionFrequencyWeekly,
+		ContributionFrequencyFortnightly,
+		ContributionFrequencyMonthly,
+		ContributionFrequencyTwiceMonthly,
+		ContributionFrequencyBimonthly,
+		ContributionFrequencyQuarterly,
+		ContributionFrequencyBiannually,
+		ContributionFrequencyAnnually:
+		return true
+	}
+	return false
+}
+
+func AllContributionFrequencyValues() []ContributionFrequency {
+	return []ContributionFrequency{
+		ContributionFrequencyDaily,
+		ContributionFrequencyWeekly,
+		ContributionFrequencyFortnightly,
+		ContributionFrequencyMonthly,
+		ContributionFrequencyTwiceMonthly,
+		ContributionFrequencyBimonthly,
+		ContributionFrequencyQuarterly,
+		ContributionFrequencyBiannually,
+		ContributionFrequencyAnnually,
+	}
+}
+
 type ContributionKind string
 
 const (
@@ -150,6 +204,24 @@ func (ns NullContributionKind) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.ContributionKind), nil
+}
+
+func (e ContributionKind) Valid() bool {
+	switch e {
+	case ContributionKindRegular,
+		ContributionKindOneTime,
+		ContributionKindNonScheduled:
+		return true
+	}
+	return false
+}
+
+func AllContributionKindValues() []ContributionKind {
+	return []ContributionKind{
+		ContributionKindRegular,
+		ContributionKindOneTime,
+		ContributionKindNonScheduled,
+	}
 }
 
 type FineKind string
@@ -194,6 +266,22 @@ func (ns NullFineKind) Value() (driver.Value, error) {
 	return string(ns.FineKind), nil
 }
 
+func (e FineKind) Valid() bool {
+	switch e {
+	case FineKindFixed,
+		FineKindPercentage:
+		return true
+	}
+	return false
+}
+
+func AllFineKindValues() []FineKind {
+	return []FineKind{
+		FineKindFixed,
+		FineKindPercentage,
+	}
+}
+
 type GroupStatus string
 
 const (
@@ -236,6 +324,26 @@ func (ns NullGroupStatus) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.GroupStatus), nil
+}
+
+func (e GroupStatus) Valid() bool {
+	switch e {
+	case GroupStatusSetup,
+		GroupStatusActive,
+		GroupStatusSuspended,
+		GroupStatusClosed:
+		return true
+	}
+	return false
+}
+
+func AllGroupStatusValues() []GroupStatus {
+	return []GroupStatus{
+		GroupStatusSetup,
+		GroupStatusActive,
+		GroupStatusSuspended,
+		GroupStatusClosed,
+	}
 }
 
 type LedgerEntryType string
@@ -292,6 +400,46 @@ func (ns NullLedgerEntryType) Value() (driver.Value, error) {
 	return string(ns.LedgerEntryType), nil
 }
 
+func (e LedgerEntryType) Valid() bool {
+	switch e {
+	case LedgerEntryTypeContributionInvoice,
+		LedgerEntryTypeContributionFineInvoice,
+		LedgerEntryTypeFineInvoice,
+		LedgerEntryTypeMiscInvoice,
+		LedgerEntryTypeContributionPayment,
+		LedgerEntryTypeFinePayment,
+		LedgerEntryTypeMiscPayment,
+		LedgerEntryTypeContributionRefund,
+		LedgerEntryTypeContributionTransferIn,
+		LedgerEntryTypeContributionTransferOut,
+		LedgerEntryTypeContributionToFineTransfer,
+		LedgerEntryTypeContributionToLoanTransfer,
+		LedgerEntryTypeLoanToContributionTransfer,
+		LedgerEntryTypeLoanToFineTransfer:
+		return true
+	}
+	return false
+}
+
+func AllLedgerEntryTypeValues() []LedgerEntryType {
+	return []LedgerEntryType{
+		LedgerEntryTypeContributionInvoice,
+		LedgerEntryTypeContributionFineInvoice,
+		LedgerEntryTypeFineInvoice,
+		LedgerEntryTypeMiscInvoice,
+		LedgerEntryTypeContributionPayment,
+		LedgerEntryTypeFinePayment,
+		LedgerEntryTypeMiscPayment,
+		LedgerEntryTypeContributionRefund,
+		LedgerEntryTypeContributionTransferIn,
+		LedgerEntryTypeContributionTransferOut,
+		LedgerEntryTypeContributionToFineTransfer,
+		LedgerEntryTypeContributionToLoanTransfer,
+		LedgerEntryTypeLoanToContributionTransfer,
+		LedgerEntryTypeLoanToFineTransfer,
+	}
+}
+
 type MembershipStatus string
 
 const (
@@ -333,6 +481,24 @@ func (ns NullMembershipStatus) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.MembershipStatus), nil
+}
+
+func (e MembershipStatus) Valid() bool {
+	switch e {
+	case MembershipStatusActive,
+		MembershipStatusSuspended,
+		MembershipStatusRemoved:
+		return true
+	}
+	return false
+}
+
+func AllMembershipStatusValues() []MembershipStatus {
+	return []MembershipStatus{
+		MembershipStatusActive,
+		MembershipStatusSuspended,
+		MembershipStatusRemoved,
+	}
 }
 
 type PlatformRole string
@@ -382,6 +548,36 @@ func (ns NullPlatformRole) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.PlatformRole), nil
+}
+
+func (e PlatformRole) Valid() bool {
+	switch e {
+	case PlatformRoleAdmin,
+		PlatformRoleGroupAccountManager,
+		PlatformRoleBanker,
+		PlatformRolePartner,
+		PlatformRoleSales,
+		PlatformRoleDioceseAdmin,
+		PlatformRoleDeaneryAdmin,
+		PlatformRoleParishAdmin,
+		PlatformRoleSubParishAdmin:
+		return true
+	}
+	return false
+}
+
+func AllPlatformRoleValues() []PlatformRole {
+	return []PlatformRole{
+		PlatformRoleAdmin,
+		PlatformRoleGroupAccountManager,
+		PlatformRoleBanker,
+		PlatformRolePartner,
+		PlatformRoleSales,
+		PlatformRoleDioceseAdmin,
+		PlatformRoleDeaneryAdmin,
+		PlatformRoleParishAdmin,
+		PlatformRoleSubParishAdmin,
+	}
 }
 
 type Contribution struct {
