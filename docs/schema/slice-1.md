@@ -33,7 +33,7 @@ and `app/libraries/{Contribution_invoices,Transactions}.php`.
 | New table | Legacy source | Notes |
 |---|---|---|
 | `users` | `users` | Login identity is **phone** (Ion Auth `identity = 'phone'`), normalised to E.164. Email is optional and unique case-insensitively. The 30+ KYC columns are dropped from users and the useful ones move to `memberships.profile`. |
-| `user_platform_roles` | `groups` + `users_groups` (Ion Auth) | Legacy role ids: 1 admin, 2 member, 3 group-account-manager, 4 banker, 5 partner, 6 sales. "member" is implicit and not stored. |
+| `user_platform_roles` | `groups` + `users_groups` (Ion Auth) | Legacy role ids: 1 admin, 2 member, 3 group-account-manager, 4 banker, 5 partner, 6 sales, 7 diocese, 8 deanery, 9 parish, 10 sub-parish. "member" (2) is implicit and not stored. |
 | `refresh_tokens` | none (replaces CI file sessions and `remember_code`) | Opaque rotating refresh token, stored only as a SHA-256 hash. |
 | `groups` | `investment_groups` | `status` comes from `active`/`status`/`group_setup_status`. All other flags go in `settings` jsonb. |
 | `group_roles` | `group_roles` | Per-group offices (Chair Person, Treasurer, ...). |
@@ -72,9 +72,13 @@ this data. Statements use `is_a_back_dating_record` instead, which is carried as
 
 These need decisions in the ETL (step 3). None of them block the schema.
 
-1. **`users_groups.user_id` is NULL in all 874 rows.** Anonymisation broke platform
-   roles, so we can't tell who the platform admins are from this dump. For dev we
-   seed an admin. At cutover the production export needs this table intact.
+1. **`users_groups.user_id` is NULL in all 874 rows of the anonymized dump.** A
+   separate intact export (`data/users_groups.sql` in the project files) fixes this.
+   All 874 rows match dump users, and every user has at least one row. 866 are plain
+   members. The non-member roles are admin for users 1 and 3, group-account-manager
+   for 46237, banker for 1, and diocese/parish for 1 and 52429. The ETL reads roles
+   from that file. Its audit columns are still AES-encrypted blobs, but we don't need
+   them.
 2. **Phones are 4-digit placeholders** in the dump (`users.phone` is `int(11)`, which
    also overflows real Kenyan numbers in production). `calling_code` is mixed:
    `254`, `+254`, `+25`, or NULL. The ETL normalises to E.164 and sets phone to NULL

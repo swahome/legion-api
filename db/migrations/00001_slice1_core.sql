@@ -28,7 +28,10 @@ CREATE UNIQUE INDEX users_email_key ON users (lower(email)) WHERE email IS NOT N
 
 -- Platform-wide roles (legacy Ion Auth `groups` + `users_groups`).
 -- Per-group officials are modelled on memberships, not here.
-CREATE TYPE platform_role AS ENUM ('admin', 'group_account_manager', 'banker', 'partner', 'sales');
+CREATE TYPE platform_role AS ENUM (
+    'admin', 'group_account_manager', 'banker', 'partner', 'sales',
+    'diocese_admin', 'deanery_admin', 'parish_admin', 'sub_parish_admin'
+);
 
 CREATE TABLE user_platform_roles (
     user_id    bigint NOT NULL REFERENCES users (id) ON DELETE CASCADE,
