@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"math"
@@ -193,33 +192,16 @@ func (s *Server) writeWithdrawalRequest(w http.ResponseWriter, r *http.Request, 
 
 // recipient says where the money is paid: a phone number, a paybill or a
 // bank account. It is kept for the payment API and shown to signatories.
-type recipient struct {
-	Type          string `json:"type"`
-	Phone         string `json:"phone,omitempty"`
-	Paybill       string `json:"paybill,omitempty"`
-	AccountNumber string `json:"account_number,omitempty"`
-	AccountName   string `json:"account_name,omitempty"`
-	BankID        int64  `json:"bank_id,omitempty"`
-}
+type recipient = books.Recipient
 
-func (rc *recipient) check() error {
-	rc.Phone, rc.Paybill = strings.TrimSpace(rc.Phone), strings.TrimSpace(rc.Paybill)
-	rc.AccountNumber, rc.AccountName = strings.TrimSpace(rc.AccountNumber), strings.TrimSpace(rc.AccountName)
-	switch rc.Type {
-	case "mobile":
-		if rc.Phone == "" {
-			return badRequest{Code: "invalid_recipient", Msg: "A mobile money recipient needs a phone number."}
-		}
-	case "paybill":
-		if rc.Paybill == "" {
-			return badRequest{Code: "invalid_recipient", Msg: "A paybill recipient needs the paybill number."}
-		}
-	case "bank":
-		if rc.BankID == 0 || rc.AccountNumber == "" || rc.AccountName == "" {
-			return badRequest{Code: "invalid_recipient", Msg: "A bank recipient needs the bank, account number and account name."}
-		}
-	default:
-		return badRequest{Code: "invalid_recipient", Msg: "recipient.type must be mobile, paybill or bank."}
+// checkRecipient adds the web's own rule to books' check: a bank
+// recipient names the account holder.
+func checkRecipient(rc *recipient) error {
+	if err := rc.Check(); err != nil {
+		return err
+	}
+	if rc.Type == "bank" && rc.AccountName == "" {
+		return badRequest{Code: "invalid_recipient", Msg: "A bank recipient needs the bank, account number and account name."}
 	}
 	return nil
 }
@@ -236,102 +218,34 @@ type createWithdrawalRequestBody struct {
 	Recipient         *recipient `json:"recipient"`
 }
 
-const refAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-
-func referenceNumber() string {
-	b := make([]byte, 10)
-	_, _ = rand.Read(b)
-	for i := range b {
-		b[i] = refAlphabet[int(b[i])%len(refAlphabet)]
-	}
-	return string(b)
-}
-
 func (s *Server) createWithdrawalRequest(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	var req createWithdrawalRequestBody
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	req.Description = strings.TrimSpace(req.Description)
 	userID := claimsFrom(r.Context()).UserID
+	nr := books.NewRequest{
+		Kind: store.WithdrawalKind(req.Kind), AccountID: req.AccountID, ToAccountID: req.ToAccountID,
+		Description: req.Description, ExpenseCategoryID: req.ExpenseCategoryID, MemberID: req.MemberID,
+		ContributionID: req.ContributionID, Recipient: req.Recipient, RequestedBy: a.MembershipID,
+		OfficialsOnly: a.setting("restrict_wallet_approval_to_group_admins") == "1",
+	}
+	if req.Amount != nil {
+		nr.Amount = string(*req.Amount)
+	}
 	var id int64
-	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
-		ctx, q := r.Context(), s.q.WithTx(tx)
-		if req.Amount == nil || cents(string(*req.Amount)) <= 0 {
-			return badRequest{Code: "invalid_amount", Msg: "amount must be more than zero."}
+	err := func() error {
+		if req.Recipient != nil && nr.Kind != store.WithdrawalKindFundsTransfer {
+			if err := checkRecipient(req.Recipient); err != nil {
+				return err
+			}
 		}
-		kind := store.WithdrawalKind(req.Kind)
-		acct, err := openAccount(ctx, q, a.Group.ID, req.AccountID)
-		if err != nil {
+		return pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) (err error) {
+			id, err = books.CreateRequest(r.Context(), s.q.WithTx(tx), a.Group.ID, userID, nr)
 			return err
-		}
-		switch {
-		case kind == store.WithdrawalKindFundsTransfer:
-			if req.ToAccountID == nil {
-				return badRequest{Code: "missing_fields", Msg: "to_account_id is required for a transfer."}
-			}
-			if req.ExpenseCategoryID != nil || req.MemberID != nil || req.ContributionID != nil || req.Recipient != nil {
-				return badRequest{Code: "invalid_body", Msg: "A transfer only names the two accounts."}
-			}
-			if _, _, err := books.TransferAccounts(ctx, q, a.Group.ID, acct.ID, *req.ToAccountID); err != nil {
-				return err
-			}
-		case books.RecordableWithdrawals[kind]:
-			if req.ToAccountID != nil {
-				return badRequest{Code: "invalid_body", Msg: "to_account_id is only for transfers."}
-			}
-			if err := books.CheckWithdrawal(ctx, q, a.Group.ID, books.Withdrawal{Kind: kind, Amount: string(*req.Amount), MemberID: req.MemberID,
-				ContributionID: req.ContributionID, ExpenseCategoryID: req.ExpenseCategoryID}); err != nil {
-				return err
-			}
-			if req.Recipient == nil {
-				return badRequest{Code: "missing_fields", Msg: "recipient is required: who is being paid."}
-			}
-			if err := req.Recipient.check(); err != nil {
-				return err
-			}
-		default:
-			return badRequest{Code: "invalid_kind", Msg: "kind must be expense, contribution_refund or funds_transfer."}
-		}
-		if err := books.CheckBalance(ctx, q, acct, string(*req.Amount)); err != nil {
-			return err
-		}
-		signatories, err := q.GroupSignatories(ctx, store.GroupSignatoriesParams{
-			GroupID: a.Group.ID, OfficialsOnly: a.setting("restrict_wallet_approval_to_group_admins") == "1",
 		})
-		if err != nil {
-			return err
-		}
-		if len(signatories) < 2 {
-			return conflict{"not_enough_signatories", "The group needs at least two signatories (members with a group role) to approve withdrawals."}
-		}
-		rcp := []byte("{}")
-		if req.Recipient != nil {
-			rcp, _ = json.Marshal(req.Recipient)
-		}
-		id, err = q.CreateWithdrawalRequest(ctx, store.CreateWithdrawalRequestParams{
-			GroupID: a.Group.ID, ReferenceNumber: referenceNumber(), Kind: kind, RequestedBy: a.MembershipID,
-			AccountID: &acct.ID, ToAccountID: req.ToAccountID, Amount: req.Amount.Numeric(), Description: req.Description,
-			ExpenseCategoryID: req.ExpenseCategoryID, MembershipID: req.MemberID, ContributionID: req.ContributionID,
-			Recipient: rcp, CreatedBy: &userID,
-		})
-		if err != nil {
-			return err
-		}
-		for _, m := range signatories {
-			p := store.CreateWithdrawalApprovalParams{
-				GroupID: a.Group.ID, WithdrawalRequestID: id, MembershipID: m, Decision: store.ApprovalDecisionPending,
-			}
-			if a.MembershipID != nil && *a.MembershipID == m {
-				p.Decision, p.DecidedBy = store.ApprovalDecisionApproved, &userID
-			}
-			if err := q.CreateWithdrawalApproval(ctx, p); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	}()
 	if writeMoneyError(w, r, err) {
 		return
 	}
@@ -339,9 +253,7 @@ func (s *Server) createWithdrawalRequest(w http.ResponseWriter, r *http.Request)
 }
 
 // conflict is a 409 raised inside a transaction.
-type conflict struct{ code, msg string }
-
-func (e conflict) Error() string { return e.msg }
+type conflict = books.Conflict
 
 // writeMoneyError writes the response for an error from a money write and
 // reports whether there was one.
@@ -355,8 +267,8 @@ func writeMoneyError(w http.ResponseWriter, r *http.Request, err error) bool {
 	case errors.As(err, &bad):
 		writeError(w, http.StatusBadRequest, bad.Code, bad.Msg)
 	case errors.As(err, &cf):
-		writeError(w, http.StatusConflict, cf.code, cf.msg)
-	case errors.Is(err, errNotFound):
+		writeError(w, http.StatusConflict, cf.Code, cf.Msg)
+	case errors.Is(err, errNotFound), errors.Is(err, books.ErrNotFound):
 		writeError(w, http.StatusNotFound, "request_not_found", "Withdrawal request not found.")
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		writeError(w, http.StatusUnauthorized, "wrong_password", "That password is not right.")
@@ -377,11 +289,7 @@ func lockRequest(ctx context.Context, q *store.Queries, groupID int64, r *http.R
 	if !ok {
 		return store.WithdrawalRequest{}, errNotFound
 	}
-	x, err := q.GetWithdrawalRequestForUpdate(ctx, store.GetWithdrawalRequestForUpdateParams{GroupID: groupID, ID: id})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return x, errNotFound
-	}
-	return x, err
+	return books.LockRequest(ctx, q, groupID, id)
 }
 
 type decisionBody struct {
@@ -405,57 +313,23 @@ func (s *Server) decideWithdrawalRequest(w http.ResponseWriter, r *http.Request,
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	body.Reason = strings.TrimSpace(body.Reason)
 	userID := claimsFrom(r.Context()).UserID
-	var id int64
+	id, _ := pathID(r, "requestID")
 	err := func() error {
 		if body.Password == "" {
 			return badRequest{Code: "missing_fields", Msg: "Enter your password to answer a withdrawal request."}
 		}
-		if decision == store.ApprovalDecisionDeclined && body.Reason == "" {
+		if decision == store.ApprovalDecisionDeclined && strings.TrimSpace(body.Reason) == "" {
 			return badRequest{Code: "missing_fields", Msg: "Say why you are declining."}
 		}
 		if a.MembershipID == nil {
-			return conflict{"not_a_signatory", "You are not a signatory on this request."}
+			return conflict{Code: "not_a_signatory", Msg: "You are not a signatory on this request."}
 		}
 		if err := s.auth.ConfirmPassword(r.Context(), userID, body.Password, clientInfo(r)); err != nil {
 			return err
 		}
 		return pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
-			ctx, q := r.Context(), s.q.WithTx(tx)
-			x, err := lockRequest(ctx, q, a.Group.ID, r)
-			if err != nil {
-				return err
-			}
-			id = x.ID
-			if x.Status != store.WithdrawalRequestStatusPending {
-				return conflict{"request_closed", "This request is already " + string(x.Status) + "."}
-			}
-			n, err := q.DecideWithdrawalApproval(ctx, store.DecideWithdrawalApprovalParams{
-				Decision: decision, Comment: body.Reason, DecidedBy: &userID,
-				WithdrawalRequestID: x.ID, MembershipID: *a.MembershipID,
-			})
-			if err != nil {
-				return err
-			}
-			if n == 0 {
-				return conflict{"not_a_signatory", "You are not a signatory on this request, or you have already answered."}
-			}
-			t, err := q.ApprovalTally(ctx, x.ID)
-			if err != nil {
-				return err
-			}
-			switch {
-			case t.Declined > 0:
-				return q.SetWithdrawalRequestStatus(ctx, store.SetWithdrawalRequestStatusParams{
-					GroupID: a.Group.ID, ID: x.ID, Status: store.WithdrawalRequestStatusDeclined, DeclineReason: &body.Reason,
-				})
-			case t.Approved == t.Total:
-				return q.SetWithdrawalRequestStatus(ctx, store.SetWithdrawalRequestStatusParams{
-					GroupID: a.Group.ID, ID: x.ID, Status: store.WithdrawalRequestStatusApproved,
-				})
-			}
-			return nil
+			return books.DecideRequest(r.Context(), s.q.WithTx(tx), a.Group.ID, id, *a.MembershipID, userID, decision, body.Reason)
 		})
 	}()
 	if writeMoneyError(w, r, err) {
@@ -473,24 +347,10 @@ func (s *Server) cancelWithdrawalRequest(w http.ResponseWriter, r *http.Request)
 	if r.ContentLength != 0 && !decodeJSON(w, r, &body) {
 		return
 	}
-	reason := strings.TrimSpace(body.Reason)
-	if reason == "" {
-		reason = "Cancelled"
-	}
-	var id int64
+	id, _ := pathID(r, "requestID")
 	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
-		ctx, q := r.Context(), s.q.WithTx(tx)
-		x, err := lockRequest(ctx, q, a.Group.ID, r)
-		if err != nil {
-			return err
-		}
-		id = x.ID
-		if x.Status != store.WithdrawalRequestStatusPending && x.Status != store.WithdrawalRequestStatusApproved {
-			return conflict{"request_closed", "This request is already " + string(x.Status) + "."}
-		}
-		return q.SetWithdrawalRequestStatus(ctx, store.SetWithdrawalRequestStatusParams{
-			GroupID: a.Group.ID, ID: x.ID, Status: store.WithdrawalRequestStatusCancelled, DeclineReason: &reason,
-		})
+		return books.CancelRequest(r.Context(), s.q.WithTx(tx), a.Group.ID, id, body.Reason,
+			store.WithdrawalRequestStatusPending, store.WithdrawalRequestStatusApproved)
 	})
 	if writeMoneyError(w, r, err) {
 		return
@@ -521,7 +381,7 @@ func (s *Server) payWithdrawalRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		id = x.ID
 		if x.Status != store.WithdrawalRequestStatusApproved {
-			return conflict{"not_approved", "Only an approved request can be paid; this one is " + string(x.Status) + "."}
+			return conflict{Code: "not_approved", Msg: "Only an approved request can be paid; this one is " + string(x.Status) + "."}
 		}
 		amount := Amount(money(deref(numericString(x.Amount))))
 		if err := checkAmountDate(&amount, body.Date, body.Method, "payment"); err != nil {
