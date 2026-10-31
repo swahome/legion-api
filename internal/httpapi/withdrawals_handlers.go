@@ -1,14 +1,13 @@
 package httpapi
 
 import (
-	"context"
 	"errors"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/swahome/legion-api/internal/books"
 	"github.com/swahome/legion-api/internal/store"
 )
 
@@ -135,159 +134,30 @@ type withdrawalRequest struct {
 	ExpenseCategoryID *int64  `json:"expense_category_id"`
 }
 
-// Kinds that can be recorded by hand so far. Loan disbursements come with
-// loans (milestone 4); asset, stock and money market purchases, bank loan
-// repayments and dividends with the investments milestone. Funds transfers
-// are account transfers.
-var recordableWithdrawals = map[store.WithdrawalKind]bool{
-	store.WithdrawalKindExpense:            true,
-	store.WithdrawalKindContributionRefund: true,
-}
-
-// found turns an existence check into a 400 when the row is missing:
-// found(code, msg)(q.SomethingInGroup(ctx, ...)).
-func found(code, msg string) func(bool, error) error {
-	return func(ok bool, err error) error {
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return badRequest{code, msg}
-		}
-		return nil
-	}
-}
-
-// moneyOut is what a withdrawal pays and where it goes, shared by recorded
-// withdrawals and withdrawal requests.
-type moneyOut struct {
-	kind              store.WithdrawalKind
-	amount            Amount
-	memberID          *int64
-	contributionID    *int64
-	expenseCategoryID *int64
-}
-
-// checkMoneyOut validates the references a withdrawal makes. It runs
-// inside the write transaction.
-func checkMoneyOut(ctx context.Context, q *store.Queries, groupID int64, m moneyOut) error {
-	switch m.kind {
-	case store.WithdrawalKindExpense:
-		if m.expenseCategoryID == nil {
-			return badRequest{"missing_fields", "expense_category_id is required for an expense."}
-		}
-		if m.memberID != nil || m.contributionID != nil {
-			return badRequest{"invalid_body", "An expense is not linked to a member or contribution."}
-		}
-		return found("invalid_expense_category", "That expense category is not in this group.")(
-			q.ExpenseCategoryInGroup(ctx, store.ExpenseCategoryInGroupParams{GroupID: groupID, ID: *m.expenseCategoryID}))
-	case store.WithdrawalKindContributionRefund:
-		if m.memberID == nil || m.contributionID == nil {
-			return badRequest{"missing_fields", "member_id and contribution_id are required for a refund."}
-		}
-		if m.expenseCategoryID != nil {
-			return badRequest{"invalid_body", "A refund has no expense category."}
-		}
-		if err := found("invalid_member", "That member is not in this group.")(
-			q.ActiveMembershipInGroup(ctx, store.ActiveMembershipInGroupParams{GroupID: groupID, ID: *m.memberID})); err != nil {
-			return err
-		}
-		if err := found("invalid_contribution", "That contribution is not in this group.")(
-			q.ContributionInGroup(ctx, store.ContributionInGroupParams{GroupID: groupID, ID: *m.contributionID})); err != nil {
-			return err
-		}
-		paid, err := q.ContributionPaidByMember(ctx, store.ContributionPaidByMemberParams{
-			GroupID: groupID, MembershipID: m.memberID, ContributionID: m.contributionID,
-		})
-		if err != nil {
-			return err
-		}
-		if cents(string(m.amount)) > cents(paid) {
-			return badRequest{"refund_too_large", "The member has only paid " + money(paid) + " into this contribution."}
-		}
-		return nil
-	}
-	return badRequest{"invalid_kind", "kind must be expense or contribution_refund."}
-}
-
-// checkBalance refuses to take an account below zero.
-func checkBalance(ctx context.Context, q *store.Queries, acct store.GroupAccount, amount Amount) error {
-	bal, err := q.AccountBalance(ctx, store.AccountBalanceParams{GroupID: acct.GroupID, ID: acct.ID})
-	if err != nil {
-		return err
-	}
-	if cents(string(amount)) > cents(bal) {
-		return badRequest{"insufficient_balance", acct.Name + " holds " + money(bal) + ", which is not enough for this."}
-	}
-	return nil
-}
-
-// recordWithdrawal writes a withdrawal, its cash book entry and, for a
-// refund, the member's ledger entry. It runs inside the caller's transaction.
-func recordWithdrawal(ctx context.Context, q *store.Queries, acct store.GroupAccount, m moneyOut,
-	method *string, date time.Time, description string, userID int64) (int64, error) {
-	p := store.CreateWithdrawalParams{
-		GroupID: acct.GroupID, AccountID: &acct.ID, AccountKind: acct.Kind, Kind: m.kind,
-		MembershipID: m.memberID, ContributionID: m.contributionID, ExpenseCategoryID: m.expenseCategoryID,
-		Amount: m.amount.Numeric(), WithdrawalDate: date, Description: description, CreatedBy: &userID,
-	}
-	if method != nil {
-		p.Method = store.NullPaymentMethod{PaymentMethod: store.PaymentMethod(*method), Valid: true}
-	}
-	id, err := q.CreateWithdrawal(ctx, p)
-	if err != nil {
-		return 0, err
-	}
-	if err := q.CreateAccountEntry(ctx, store.CreateAccountEntryParams{
-		GroupID: acct.GroupID, AccountID: &acct.ID, AccountKind: acct.Kind, Direction: -1, Amount: p.Amount,
-		EntryDate: date, Description: description, WithdrawalID: &id, MembershipID: m.memberID,
-	}); err != nil {
-		return 0, err
-	}
-	if m.kind == store.WithdrawalKindContributionRefund {
-		if err := q.CreateRefundLedgerEntry(ctx, store.CreateRefundLedgerEntryParams{
-			GroupID: acct.GroupID, MembershipID: m.memberID, ContributionID: m.contributionID,
-			Amount: p.Amount, EntryDate: date, Description: description, WithdrawalID: &id,
-		}); err != nil {
-			return 0, err
-		}
-	}
-	return id, nil
-}
-
 func (s *Server) createWithdrawal(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	var req withdrawalRequest
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	req.Description = strings.TrimSpace(req.Description)
+	m := books.Withdrawal{Kind: store.WithdrawalKind(req.Kind), MemberID: req.MemberID,
+		ContributionID: req.ContributionID, ExpenseCategoryID: req.ExpenseCategoryID}
+	if req.Amount != nil {
+		m.Amount = string(*req.Amount)
+	}
+	var date *time.Time
+	if req.Date != nil {
+		date = &req.Date.Time
+	}
 	userID := claimsFrom(r.Context()).UserID
 	var id int64
-	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
-		ctx, q := r.Context(), s.q.WithTx(tx)
-		kind := store.WithdrawalKind(req.Kind)
-		if !recordableWithdrawals[kind] {
-			return badRequest{"invalid_kind", "kind must be expense or contribution_refund."}
-		}
-		if err := checkAmountDate(req.Amount, req.Date, req.Method, "withdrawal"); err != nil {
-			return err
-		}
-		acct, err := openAccount(ctx, q, a.Group.ID, req.AccountID)
-		if err != nil {
-			return err
-		}
-		m := moneyOut{kind: kind, amount: *req.Amount, memberID: req.MemberID,
-			contributionID: req.ContributionID, expenseCategoryID: req.ExpenseCategoryID}
-		if err := checkMoneyOut(ctx, q, a.Group.ID, m); err != nil {
-			return err
-		}
-		id, err = recordWithdrawal(ctx, q, acct, m, req.Method, req.Date.Time, req.Description, userID)
+	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) (err error) {
+		id, err = books.RecordWithdrawal(r.Context(), s.q.WithTx(tx), a.Group.ID, userID, req.AccountID, m, req.Method, date, req.Description)
 		return err
 	})
 	var bad badRequest
 	if errors.As(err, &bad) {
-		writeError(w, http.StatusBadRequest, bad.code, bad.msg)
+		writeError(w, http.StatusBadRequest, bad.Code, bad.Msg)
 		return
 	}
 	if err != nil {
@@ -307,31 +177,15 @@ func (s *Server) voidWithdrawal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID := claimsFrom(r.Context()).UserID
-	var exists bool
 	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
-		q := s.q.WithTx(tx)
-		if _, err := q.GetWithdrawal(r.Context(), store.GetWithdrawalParams{GroupID: a.Group.ID, ID: id}); err != nil {
-			return err
-		}
-		exists = true
-		n, err := q.VoidWithdrawal(r.Context(), store.VoidWithdrawalParams{GroupID: a.Group.ID, ID: id, VoidedBy: &userID})
-		if err != nil {
-			return err
-		}
-		if n == 0 {
-			return badRequest{"already_voided", "This withdrawal is already voided."}
-		}
-		if err := q.VoidWithdrawalEntries(r.Context(), &id); err != nil {
-			return err
-		}
-		return q.VoidWithdrawalLedger(r.Context(), &id)
+		return books.VoidWithdrawal(r.Context(), s.q.WithTx(tx), a.Group.ID, id, userID)
 	})
 	var bad badRequest
 	switch {
-	case !exists && errors.Is(err, pgx.ErrNoRows):
+	case errors.Is(err, books.ErrNotFound):
 		writeError(w, http.StatusNotFound, "withdrawal_not_found", "Withdrawal not found.")
 	case errors.As(err, &bad):
-		writeError(w, http.StatusConflict, bad.code, bad.msg)
+		writeError(w, http.StatusConflict, bad.Code, bad.Msg)
 	case err != nil:
 		writeInternal(w, r, err)
 	default:
@@ -412,68 +266,29 @@ type transferRequest struct {
 	Description   string  `json:"description"`
 }
 
-// recordTransfer writes a transfer and its two cash book entries. It runs
-// inside the caller's transaction.
-func recordTransfer(ctx context.Context, q *store.Queries, from, to store.GroupAccount, amount Amount,
-	date time.Time, description string, userID int64) (int64, error) {
-	n := amount.Numeric()
-	id, err := q.CreateAccountTransfer(ctx, store.CreateAccountTransferParams{
-		GroupID: from.GroupID, FromAccountID: &from.ID, ToAccountID: &to.ID, Amount: n,
-		TransferDate: date, Description: description, CreatedBy: &userID,
-	})
-	if err != nil {
-		return 0, err
-	}
-	for _, leg := range []struct {
-		acct store.GroupAccount
-		dir  int16
-	}{{from, -1}, {to, 1}} {
-		if err := q.CreateAccountEntry(ctx, store.CreateAccountEntryParams{
-			GroupID: from.GroupID, AccountID: &leg.acct.ID, AccountKind: leg.acct.Kind, Direction: leg.dir,
-			Amount: n, EntryDate: date, Description: description, AccountTransferID: &id,
-		}); err != nil {
-			return 0, err
-		}
-	}
-	return id, nil
-}
-
-// transferAccounts checks both sides of a transfer.
-func transferAccounts(ctx context.Context, q *store.Queries, groupID, fromID, toID int64) (from, to store.GroupAccount, err error) {
-	if fromID == toID {
-		return from, to, badRequest{"same_account", "Pick two different accounts."}
-	}
-	if from, err = openAccount(ctx, q, groupID, fromID); err != nil {
-		return from, to, err
-	}
-	to, err = openAccount(ctx, q, groupID, toID)
-	return from, to, err
-}
-
 func (s *Server) createTransfer(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	var req transferRequest
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	req.Description = strings.TrimSpace(req.Description)
+	amount := ""
+	if req.Amount != nil {
+		amount = string(*req.Amount)
+	}
+	var date *time.Time
+	if req.Date != nil {
+		date = &req.Date.Time
+	}
 	userID := claimsFrom(r.Context()).UserID
 	var id int64
-	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
-		ctx, q := r.Context(), s.q.WithTx(tx)
-		if err := checkAmountDate(req.Amount, req.Date, nil, "transfer"); err != nil {
-			return err
-		}
-		from, to, err := transferAccounts(ctx, q, a.Group.ID, req.FromAccountID, req.ToAccountID)
-		if err != nil {
-			return err
-		}
-		id, err = recordTransfer(ctx, q, from, to, *req.Amount, req.Date.Time, req.Description, userID)
+	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) (err error) {
+		id, err = books.RecordTransfer(r.Context(), s.q.WithTx(tx), a.Group.ID, userID, req.FromAccountID, req.ToAccountID, amount, date, req.Description)
 		return err
 	})
 	var bad badRequest
 	if errors.As(err, &bad) {
-		writeError(w, http.StatusBadRequest, bad.code, bad.msg)
+		writeError(w, http.StatusBadRequest, bad.Code, bad.Msg)
 		return
 	}
 	if err != nil {
@@ -491,31 +306,17 @@ func (s *Server) voidTransfer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID := claimsFrom(r.Context()).UserID
-	var exists bool
 	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
-		q := s.q.WithTx(tx)
-		ok, err := q.AccountTransferExists(r.Context(), store.AccountTransferExistsParams{GroupID: a.Group.ID, ID: id})
-		if err != nil || !ok {
-			return err
-		}
-		exists = true
-		n, err := q.VoidAccountTransfer(r.Context(), store.VoidAccountTransferParams{GroupID: a.Group.ID, ID: id, VoidedBy: &userID})
-		if err != nil {
-			return err
-		}
-		if n == 0 {
-			return badRequest{"already_voided", "This transfer is already voided."}
-		}
-		return q.VoidAccountTransferEntries(r.Context(), &id)
+		return books.VoidTransfer(r.Context(), s.q.WithTx(tx), a.Group.ID, id, userID)
 	})
 	var bad badRequest
 	switch {
+	case errors.Is(err, books.ErrNotFound):
+		writeError(w, http.StatusNotFound, "transfer_not_found", "Transfer not found.")
 	case errors.As(err, &bad):
-		writeError(w, http.StatusConflict, bad.code, bad.msg)
+		writeError(w, http.StatusConflict, bad.Code, bad.Msg)
 	case err != nil:
 		writeInternal(w, r, err)
-	case !exists:
-		writeError(w, http.StatusNotFound, "transfer_not_found", "Transfer not found.")
 	default:
 		s.writeTransfer(w, r, a.Group.ID, id, http.StatusOK)
 	}

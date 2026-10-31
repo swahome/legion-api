@@ -1411,6 +1411,11 @@ type MobilePin struct {
 	CreatedAt  time.Time
 }
 
+type MobileRequestID struct {
+	RequestID string
+	SeenAt    time.Time
+}
+
 type PlatformSetting struct {
 	Key       string
 	Value     []byte

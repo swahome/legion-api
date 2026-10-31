@@ -87,6 +87,81 @@ func New(pool *pgxpool.Pool, keys *Keys, authSvc *auth.Service, otp OTPSender) *
 		"contributions/get_group_contribution_options":  {fn: s.groupAction(6, s.getGroupContributionOptions)},
 		"contributions/get_member_contribution_options": {fn: s.groupAction(6, s.getMemberContributionOptions)},
 		"statements/contribution_statement":             {fn: s.groupAction(0, s.contributionStatement)},
+
+		// Milestone 3: money, read side.
+		"get_member_recent_transactions":                             {fn: s.groupAction(0, s.recentTransactions(false))},
+		"get_group_recent_transactions":                              {fn: s.groupAction(0, s.recentTransactions(true))},
+		"accounts/get_group_account_options":                         {fn: s.groupAction(6, s.accountOptions(false))},
+		"accounts/get_group_active_account_options":                  {fn: s.groupAction(6, s.accountOptions(true))},
+		"bank_accounts/get_group_bank_accounts_list":                 {fn: s.groupAction(6, s.accountsList("bank"))},
+		"sacco_accounts/get_group_sacco_accounts_list":               {fn: s.groupAction(6, s.accountsList("sacco"))},
+		"mobile_money_accounts/get_group_mobile_money_accounts_list": {fn: s.groupAction(6, s.accountsList("mobile_money"))},
+		"petty_cash_accounts/get_group_petty_cash_accounts_list":     {fn: s.groupAction(6, s.accountsList("petty_cash"))},
+		"income_categories/group_income_categories_list":             {fn: s.groupAction(6, s.categoryList("income"))},
+		"income_categories/get_group_income_category_options":        {fn: s.groupAction(6, s.categoryOptions("income"))},
+		"expense_categories/get_group_expense_categories":            {fn: s.groupAction(6, s.categoryList("expense"))},
+		"expense_categories/get_group_expense_category_options":      {fn: s.groupAction(6, s.categoryOptions("expense"))},
+		"fine_categories/group_fine_categories_list":                 {fn: s.groupAction(6, s.categoryList("fine"))},
+		"fine_categories/get_group_fine_category_options":            {fn: s.groupAction(6, s.categoryOptions("fine"))},
+		"depositors/get_group_depositor_options":                     {fn: s.groupAction(6, s.depositorOptions)},
+		"deposits/get_deposits_list":                                 {fn: s.groupAction(6, s.depositsList)},
+		"deposits/get_group_deposit":                                 {fn: s.groupAction(6, s.groupDeposit)},
+		"withdrawals/get_group_withdrawal_list":                      {fn: s.groupAction(6, s.withdrawalsList)},
+		"withdrawals/get_group_withdrawal":                           {fn: s.groupAction(6, s.groupWithdrawal)},
+		"invoices/get_group_invoices":                                {fn: s.groupAction(6, s.invoicesList)},
+		"invoices/get_group_invoice":                                 {fn: s.groupAction(6, s.groupInvoice)},
+		"fines/get_group_fines_list":                                 {fn: s.groupAction(6, s.finesList)},
+		"fines/get_group_fine_options":                               {fn: s.groupAction(6, s.fineOptions)},
+
+		// Milestone 3: recording money from the app.
+		"deposits/record_contribution_payments":                    {fn: s.groupAction(6, s.recordDeposits("contribution", "Error contribution payments array empty."))},
+		"deposits/record_fine_payments":                            {fn: s.groupAction(6, s.recordDeposits("fine", "Error fine payments array empty."))},
+		"deposits/record_miscellaneous_payments":                   {fn: s.groupAction(6, s.recordDeposits("misc", "Error miscellaneous payments array empty."))},
+		"deposits/record_income":                                   {fn: s.groupAction(6, s.recordDeposits("income", "Error income payments array empty."))},
+		"deposits/new_record_contribution_payments":                {fn: s.groupAction(6, s.newMemberDeposits("contribution"))},
+		"deposits/new_record_fine_payments":                        {fn: s.groupAction(6, s.newMemberDeposits("fine"))},
+		"deposits/new_record_miscellaneous_payments":               {fn: s.groupAction(6, s.newDeposit("misc"))},
+		"deposits/new_record_income_payment":                       {fn: s.groupAction(6, s.newDeposit("income"))},
+		"deposits/void":                                            {fn: s.groupAction(6, s.officialsOnly(s.voidDeposit))},
+		"withdrawals/record_expenses":                              {fn: s.groupAction(6, s.officialsOnly(s.recordExpenses))},
+		"withdrawals/new_record_expenses":                          {fn: s.groupAction(6, s.officialsOnly(s.newRecordExpense))},
+		"withdrawals/record_contribution_refund":                   {fn: s.groupAction(6, s.officialsOnly(s.recordContributionRefund))},
+		"withdrawals/record_funds_transfer":                        {fn: s.groupAction(6, s.officialsOnly(s.recordFundsTransfer))},
+		"withdrawals/void":                                         {fn: s.groupAction(6, s.officialsOnly(s.voidWithdrawal))},
+		"fines/fine_members":                                       {fn: s.groupAction(6, s.officialsOnly(s.fineMembers))},
+		"fines/new_fine_members":                                   {fn: s.groupAction(6, s.officialsOnly(s.newFineMembers))},
+		"invoices/create":                                          {fn: s.groupAction(6, s.officialsOnly(s.createInvoices))},
+		"invoices/void":                                            {fn: s.groupAction(6, s.officialsOnly(s.voidInvoice))},
+		"saccos/get_sacco_options":                                 {fn: s.groupAction(6, s.saccoOptions)},
+		"sacco_branches/get_sacco_branches_options":                {fn: s.groupAction(6, s.saccoBranchOptions)},
+		"mobile_money_providers/get_mobile_money_provider_options": {fn: s.groupAction(6, s.mobileMoneyProviderOptions)},
+		"withdrawals/withdrawal_request_list":                      {fn: s.groupAction(6, s.withdrawalRequestList)},
+		"withdrawals/view_withdrawal_request":                      {fn: s.groupAction(6, s.viewWithdrawalRequest)},
+		"withdrawals/request_funds_transfer":                       {fn: s.groupAction(6, s.officialsOnly(s.requestFundsTransfer))},
+		"withdrawals/respond_to_withdrawal_request":                {fn: s.groupAction(6, s.respondToWithdrawalRequest)},
+		"withdrawals/cancel_withdrawal_request":                    {fn: s.groupAction(6, s.cancelWithdrawalRequest)},
+		"reports/contribution_summary":                             {fn: s.groupAction(6, s.memberSummary(false))},
+		"reports/fines_summary":                                    {fn: s.groupAction(6, s.memberSummary(true))},
+		"reports/expenses_summary":                                 {fn: s.groupAction(6, s.expensesSummary)},
+		"reports/transaction_statement":                            {fn: s.groupAction(6, s.transactionStatement)},
+		"depositors/create":                                        {fn: s.groupAction(6, s.officialsOnly(s.createDepositor))},
+	}
+	for module, kind := range map[string]store.AccountKind{
+		"bank_accounts": store.AccountKindBank, "sacco_accounts": store.AccountKindSacco,
+		"mobile_money_accounts": store.AccountKindMobileMoney, "petty_cash_accounts": store.AccountKindPettyCash,
+	} {
+		s.actions[module+"/create"] = action{fn: s.groupAction(6, s.createAccount(kind))}
+		s.actions[module+"/edit"] = action{fn: s.groupAction(6, s.editAccount(kind))}
+		s.actions[module+"/close"] = action{fn: s.groupAction(6, s.closeAccount(kind, true))}
+		s.actions[module+"/activate"] = action{fn: s.groupAction(6, s.closeAccount(kind, false))}
+		s.actions[module+"/delete"] = action{fn: s.groupAction(6, s.deleteAccount(kind))}
+	}
+	for module, kind := range map[string]string{"income_categories": "income", "expense_categories": "expense", "fine_categories": "fine"} {
+		s.actions[module+"/create"] = action{fn: s.groupAction(6, s.createCategory(kind))}
+		s.actions[module+"/edit"] = action{fn: s.groupAction(6, s.editCategory(kind))}
+		s.actions[module+"/hide"] = action{fn: s.groupAction(6, s.hideCategory(kind, true))}
+		s.actions[module+"/unhide"] = action{fn: s.groupAction(6, s.hideCategory(kind, false))}
+		s.actions[module+"/delete"] = action{fn: s.groupAction(6, s.deleteCategory(kind))}
 	}
 	return s
 }
@@ -156,6 +231,21 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		out.send(http.StatusOK, status(3, "You are currently using an outdated application. Kindly update to latest version. Your request could not be handled at the moment. if the error persist, contact admin"))
 		return
 	}
+	// Recording actions carry a request id so a retry isn't recorded twice
+	// (legacy _request_id_required). It is checked before the user id, as before.
+	var requestID string
+	if known && requestIDActions[name] {
+		reply, err := s.claimRequestID(r.Context(), c.req.Str("request_id"))
+		if err != nil {
+			out.internal(r, err)
+			return
+		}
+		if reply != nil {
+			out.sendUnwrapped(http.StatusOK, reply)
+			return
+		}
+		requestID = c.req.Str("request_id")
+	}
 	if c.userID != 0 && c.req.Int("user_id") != c.userID {
 		out.send(http.StatusOK, status(400, "user Authentication token is invalid."))
 		return
@@ -165,6 +255,12 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp, err := act.fn(r.Context(), c)
+	if requestID != "" && (err != nil || failed(resp)) {
+		// Let the app retry a request that wasn't recorded.
+		if err := s.q.ReleaseMobileRequestID(context.WithoutCancel(r.Context()), requestID); err != nil {
+			slog.ErrorContext(r.Context(), "mobile: release request id", "err", err)
+		}
+	}
 	if err != nil {
 		out.internal(r, err)
 		return
@@ -184,6 +280,14 @@ func (o *responder) send(code int, resp any) {
 	if o.version <= unwrapVersionCode {
 		v = map[string]any{"response": resp}
 	}
+	o.write(code, v)
+}
+
+// sendUnwrapped encrypts resp as it is, for the answers the legacy
+// controller sent before reaching an action.
+func (o *responder) sendUnwrapped(code int, resp any) { o.write(code, resp) }
+
+func (o *responder) write(code int, v any) {
 	b, err := o.keys.EncryptResponse(v)
 	if err != nil {
 		slog.Error("mobile: encrypt response", "err", err)
@@ -260,4 +364,33 @@ func (q request) Str(key string) string {
 func (q request) Int(key string) int64 {
 	n, _ := strconv.ParseInt(q.Str(key), 10, 64)
 	return n
+}
+
+// Strs reads a list the app sends as a JSON array (or a single value).
+func (q request) Strs(key string) []string {
+	switch v := q[key].(type) {
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, x := range v {
+			out = append(out, request{"v": x}.Str("v"))
+		}
+		return out
+	case nil:
+		return nil
+	}
+	if s := q.Str(key); s != "" {
+		return []string{s}
+	}
+	return nil
+}
+
+// IDs reads a list of positive ids, ignoring anything else.
+func (q request) IDs(key string) []int64 {
+	var out []int64
+	for _, s := range q.Strs(key) {
+		if n, err := strconv.ParseInt(s, 10, 64); err == nil && n > 0 {
+			out = append(out, n)
+		}
+	}
+	return out
 }
