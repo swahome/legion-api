@@ -115,6 +115,12 @@ func (s *Server) Routes() http.Handler {
 				r.Get("/expense-categories", s.listCategories(s.expenseCategories))
 				r.Get("/fine-categories", s.listCategories(s.fineCategories))
 
+				// Signatories who are not officials answer withdrawal requests too.
+				r.Get("/withdrawal-requests", s.listWithdrawalRequests)
+				r.Get("/withdrawal-requests/{requestID}", s.getWithdrawalRequest)
+				r.Post("/withdrawal-requests/{requestID}/approve", s.approveWithdrawalRequest)
+				r.Post("/withdrawal-requests/{requestID}/decline", s.declineWithdrawalRequest)
+
 				r.Group(func(r chi.Router) {
 					r.Use(requireOfficial)
 					r.Post("/members", s.addMember)
@@ -143,6 +149,17 @@ func (s *Server) Routes() http.Handler {
 					r.Post("/deposits", s.createDeposit)
 					r.Get("/deposits/{depositID}", s.getDeposit)
 					r.Post("/deposits/{depositID}/void", s.voidDeposit)
+
+					r.Get("/withdrawals", s.listWithdrawals)
+					r.Post("/withdrawals", s.createWithdrawal)
+					r.Get("/withdrawals/{withdrawalID}", s.getWithdrawal)
+					r.Post("/withdrawals/{withdrawalID}/void", s.voidWithdrawal)
+					r.Get("/transfers", s.listTransfers)
+					r.Post("/transfers", s.createTransfer)
+					r.Post("/transfers/{transferID}/void", s.voidTransfer)
+					r.Post("/withdrawal-requests", s.createWithdrawalRequest)
+					r.Post("/withdrawal-requests/{requestID}/cancel", s.cancelWithdrawalRequest)
+					r.Post("/withdrawal-requests/{requestID}/pay", s.payWithdrawalRequest)
 				})
 			})
 		})

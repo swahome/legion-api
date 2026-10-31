@@ -43,8 +43,8 @@ other command.
 - **Imports the money tables** (milestone 3): saccos, mobile money providers, the
   four legacy account tables (merged into `group_accounts`, with new ids since the
   legacy ids overlap), income, expense and fine categories, depositors, deposits,
-  withdrawals, account transfers and `transaction_statements` (the cash book, now
-  `account_entries`). See `docs/schema/money.md`, including how a row's account is
+  withdrawals, account transfers, `transaction_statements` (the cash book, now
+  `account_entries`) and the e-wallet's withdrawal requests and approvals. See `docs/schema/money.md`, including how a row's account is
   found when the dump has lost `account_id`.
 - **Keeps the mobile app signed in.** Live tokens in `user_pin_access_token`
   move to `mobile_access_tokens` (hashed); expired ones and PINs are dropped.
@@ -107,6 +107,8 @@ imported rows:
   withdrawals                   2572
   account_transfers              890
   account_entries              24218
+  withdrawal_requests             82
+  withdrawal_approvals           275
   ledger_entries               49649
   platform_settings               34
   mobile_access_tokens             0
@@ -140,6 +142,8 @@ data issues (rows):
      1233  withdrawals: account taken as the group's only account of that kind
      1339  withdrawals: account unknown (several accounts of that kind), kept without account
        46  withdrawals: member missing or in another group, kept without member
+       39  withdrawal_requests: group has no single bank account, kept without account
+        1  withdrawal_requests: recipient member missing or in another group, cleared
         1  withdrawals: unknown type 0, skipped
 contribution balances: 623 members checked against the legacy algorithm, 0 mismatches
 legacy balance cache (informational): 73 members compared, 67 differ by 1 KES or more

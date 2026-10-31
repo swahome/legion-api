@@ -24,6 +24,7 @@ var DumpTables = []string{
 	"bank_accounts", "sacco_accounts", "mobile_money_accounts", "petty_cash_accounts",
 	"income_categories", "expense_categories", "fine_categories", "depositors",
 	"deposits", "withdrawals", "account_transfers", "transaction_statements",
+	"withdrawal_requests", "withdrawal_approval_requests",
 }
 
 // Options control how legacy values are mapped.
@@ -46,6 +47,7 @@ type Plan struct {
 	Saccos, SaccoBranches, Providers, Accounts                       [][]any
 	IncomeCategories, ExpenseCategories, FineCategories, Depositors  [][]any
 	Deposits, Withdrawals, AccountTransfers, AccountEntries          [][]any
+	WithdrawalRequests, WithdrawalApprovals                          [][]any
 
 	Report Report
 }
@@ -176,6 +178,8 @@ func Transform(t Tables, roles []Row, opt Options, now time.Time) (*Plan, error)
 	withdrawals := p.withdrawals(t["withdrawals"], ref, accounts, expense, now)
 	transfers := p.accountTransfers(t["account_transfers"], ref, accounts, now)
 	p.accountEntries(t["transaction_statements"], ref, accounts, deposits, withdrawals, transfers, now)
+	requests := p.withdrawalRequests(t["withdrawal_requests"], ref, accounts, expense, now)
+	p.withdrawalApprovals(t["withdrawal_approval_requests"], ref, requests, now)
 	p.ledger(t["statements"], groups, members, contribs, deposits, fines, now)
 	p.settings(t["settings"])
 	p.mobileTokens(t["user_pin_access_token"], users, now)
@@ -193,6 +197,7 @@ func Transform(t Tables, roles []Row, opt Options, now time.Time) (*Plan, error)
 		"expense_categories": p.ExpenseCategories, "fine_categories": p.FineCategories,
 		"depositors": p.Depositors, "deposits": p.Deposits, "withdrawals": p.Withdrawals,
 		"account_transfers": p.AccountTransfers, "account_entries": p.AccountEntries,
+		"withdrawal_requests": p.WithdrawalRequests, "withdrawal_approvals": p.WithdrawalApprovals,
 	} {
 		p.Report.Imported[name] = len(rows)
 	}
