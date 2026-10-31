@@ -562,6 +562,137 @@ func AllGroupStatusValues() []GroupStatus {
 	}
 }
 
+type InterestRatePer string
+
+const (
+	InterestRatePerDay   InterestRatePer = "day"
+	InterestRatePerWeek  InterestRatePer = "week"
+	InterestRatePerMonth InterestRatePer = "month"
+	InterestRatePerYear  InterestRatePer = "year"
+	InterestRatePerTerm  InterestRatePer = "term"
+)
+
+func (e *InterestRatePer) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = InterestRatePer(s)
+	case string:
+		*e = InterestRatePer(s)
+	default:
+		return fmt.Errorf("unsupported scan type for InterestRatePer: %T", src)
+	}
+	return nil
+}
+
+type NullInterestRatePer struct {
+	InterestRatePer InterestRatePer
+	Valid           bool // Valid is true if InterestRatePer is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullInterestRatePer) Scan(value interface{}) error {
+	if value == nil {
+		ns.InterestRatePer, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.InterestRatePer.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullInterestRatePer) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.InterestRatePer), nil
+}
+
+func (e InterestRatePer) Valid() bool {
+	switch e {
+	case InterestRatePerDay,
+		InterestRatePerWeek,
+		InterestRatePerMonth,
+		InterestRatePerYear,
+		InterestRatePerTerm:
+		return true
+	}
+	return false
+}
+
+func AllInterestRatePerValues() []InterestRatePer {
+	return []InterestRatePer{
+		InterestRatePerDay,
+		InterestRatePerWeek,
+		InterestRatePerMonth,
+		InterestRatePerYear,
+		InterestRatePerTerm,
+	}
+}
+
+type InterestType string
+
+const (
+	InterestTypeFixedBalance    InterestType = "fixed_balance"
+	InterestTypeReducingBalance InterestType = "reducing_balance"
+	InterestTypeCustom          InterestType = "custom"
+	InterestTypeFixedAmount     InterestType = "fixed_amount"
+)
+
+func (e *InterestType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = InterestType(s)
+	case string:
+		*e = InterestType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for InterestType: %T", src)
+	}
+	return nil
+}
+
+type NullInterestType struct {
+	InterestType InterestType
+	Valid        bool // Valid is true if InterestType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullInterestType) Scan(value interface{}) error {
+	if value == nil {
+		ns.InterestType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.InterestType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullInterestType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.InterestType), nil
+}
+
+func (e InterestType) Valid() bool {
+	switch e {
+	case InterestTypeFixedBalance,
+		InterestTypeReducingBalance,
+		InterestTypeCustom,
+		InterestTypeFixedAmount:
+		return true
+	}
+	return false
+}
+
+func AllInterestTypeValues() []InterestType {
+	return []InterestType{
+		InterestTypeFixedBalance,
+		InterestTypeReducingBalance,
+		InterestTypeCustom,
+		InterestTypeFixedAmount,
+	}
+}
+
 type LedgerEntryType string
 
 const (
@@ -653,6 +784,140 @@ func AllLedgerEntryTypeValues() []LedgerEntryType {
 		LedgerEntryTypeContributionToLoanTransfer,
 		LedgerEntryTypeLoanToContributionTransfer,
 		LedgerEntryTypeLoanToFineTransfer,
+	}
+}
+
+type LoanApplicationStatus string
+
+const (
+	LoanApplicationStatusPendingGuarantors LoanApplicationStatus = "pending_guarantors"
+	LoanApplicationStatusPendingApproval   LoanApplicationStatus = "pending_approval"
+	LoanApplicationStatusApproved          LoanApplicationStatus = "approved"
+	LoanApplicationStatusDisbursed         LoanApplicationStatus = "disbursed"
+	LoanApplicationStatusDeclined          LoanApplicationStatus = "declined"
+	LoanApplicationStatusCancelled         LoanApplicationStatus = "cancelled"
+)
+
+func (e *LoanApplicationStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = LoanApplicationStatus(s)
+	case string:
+		*e = LoanApplicationStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for LoanApplicationStatus: %T", src)
+	}
+	return nil
+}
+
+type NullLoanApplicationStatus struct {
+	LoanApplicationStatus LoanApplicationStatus
+	Valid                 bool // Valid is true if LoanApplicationStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullLoanApplicationStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.LoanApplicationStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.LoanApplicationStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullLoanApplicationStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.LoanApplicationStatus), nil
+}
+
+func (e LoanApplicationStatus) Valid() bool {
+	switch e {
+	case LoanApplicationStatusPendingGuarantors,
+		LoanApplicationStatusPendingApproval,
+		LoanApplicationStatusApproved,
+		LoanApplicationStatusDisbursed,
+		LoanApplicationStatusDeclined,
+		LoanApplicationStatusCancelled:
+		return true
+	}
+	return false
+}
+
+func AllLoanApplicationStatusValues() []LoanApplicationStatus {
+	return []LoanApplicationStatus{
+		LoanApplicationStatusPendingGuarantors,
+		LoanApplicationStatusPendingApproval,
+		LoanApplicationStatusApproved,
+		LoanApplicationStatusDisbursed,
+		LoanApplicationStatusDeclined,
+		LoanApplicationStatusCancelled,
+	}
+}
+
+type LoanChargeKind string
+
+const (
+	LoanChargeKindInstallment LoanChargeKind = "installment"
+	LoanChargeKindLateFine    LoanChargeKind = "late_fine"
+	LoanChargeKindBalanceFine LoanChargeKind = "balance_fine"
+	LoanChargeKindTransferOut LoanChargeKind = "transfer_out"
+)
+
+func (e *LoanChargeKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = LoanChargeKind(s)
+	case string:
+		*e = LoanChargeKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for LoanChargeKind: %T", src)
+	}
+	return nil
+}
+
+type NullLoanChargeKind struct {
+	LoanChargeKind LoanChargeKind
+	Valid          bool // Valid is true if LoanChargeKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullLoanChargeKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.LoanChargeKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.LoanChargeKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullLoanChargeKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.LoanChargeKind), nil
+}
+
+func (e LoanChargeKind) Valid() bool {
+	switch e {
+	case LoanChargeKindInstallment,
+		LoanChargeKindLateFine,
+		LoanChargeKindBalanceFine,
+		LoanChargeKindTransferOut:
+		return true
+	}
+	return false
+}
+
+func AllLoanChargeKindValues() []LoanChargeKind {
+	return []LoanChargeKind{
+		LoanChargeKindInstallment,
+		LoanChargeKindLateFine,
+		LoanChargeKindBalanceFine,
+		LoanChargeKindTransferOut,
 	}
 }
 
@@ -863,6 +1128,67 @@ func AllPlatformRoleValues() []PlatformRole {
 		PlatformRoleDeaneryAdmin,
 		PlatformRoleParishAdmin,
 		PlatformRoleSubParishAdmin,
+	}
+}
+
+type RepaymentFrequency string
+
+const (
+	RepaymentFrequencyDaily   RepaymentFrequency = "daily"
+	RepaymentFrequencyWeekly  RepaymentFrequency = "weekly"
+	RepaymentFrequencyMonthly RepaymentFrequency = "monthly"
+)
+
+func (e *RepaymentFrequency) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = RepaymentFrequency(s)
+	case string:
+		*e = RepaymentFrequency(s)
+	default:
+		return fmt.Errorf("unsupported scan type for RepaymentFrequency: %T", src)
+	}
+	return nil
+}
+
+type NullRepaymentFrequency struct {
+	RepaymentFrequency RepaymentFrequency
+	Valid              bool // Valid is true if RepaymentFrequency is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullRepaymentFrequency) Scan(value interface{}) error {
+	if value == nil {
+		ns.RepaymentFrequency, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.RepaymentFrequency.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullRepaymentFrequency) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.RepaymentFrequency), nil
+}
+
+func (e RepaymentFrequency) Valid() bool {
+	switch e {
+	case RepaymentFrequencyDaily,
+		RepaymentFrequencyWeekly,
+		RepaymentFrequencyMonthly:
+		return true
+	}
+	return false
+}
+
+func AllRepaymentFrequencyValues() []RepaymentFrequency {
+	return []RepaymentFrequency{
+		RepaymentFrequencyDaily,
+		RepaymentFrequencyWeekly,
+		RepaymentFrequencyMonthly,
 	}
 }
 
@@ -1204,6 +1530,7 @@ type Deposit struct {
 	CreatedAt        time.Time
 	VoidedAt         *time.Time
 	VoidedBy         *int64
+	LoanID           *int64
 }
 
 type Depositor struct {
@@ -1358,6 +1685,170 @@ type LedgerEntryRule struct {
 	Sign      int16
 }
 
+type Loan struct {
+	ID                int64
+	GroupID           int64
+	MembershipID      int64
+	LoanTypeID        *int64
+	Amount            pgtype.Numeric
+	DisbursedOn       time.Time
+	AccountID         *int64
+	InterestType      InterestType
+	InterestRate      pgtype.Numeric
+	RatePer           InterestRatePer
+	ReducingMethod    string
+	FixedInterest     pgtype.Numeric
+	FixedInterestRate pgtype.Numeric
+	Frequency         RepaymentFrequency
+	Installments      int32
+	GracePeriods      int32
+	FirstDueOn        *time.Time
+	EndsOn            time.Time
+	LateFine          []byte
+	BalanceFine       []byte
+	ProcessingFee     []byte
+	FineDeferment     bool
+	NextBalanceFineOn *time.Time
+	IsBadDebt         bool
+	Description       string
+	Settings          []byte
+	IsBackdated       bool
+	CreatedBy         *int64
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	VoidedAt          *time.Time
+	VoidedBy          *int64
+}
+
+type LoanApplication struct {
+	ID            int64
+	GroupID       int64
+	MembershipID  int64
+	LoanTypeID    int64
+	Amount        pgtype.Numeric
+	Installments  int32
+	Description   string
+	Status        LoanApplicationStatus
+	DeclineReason string
+	DecidedAt     *time.Time
+	LoanID        *int64
+	CreatedBy     *int64
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+type LoanApplicationApproval struct {
+	ID            int64
+	GroupID       int64
+	ApplicationID int64
+	MembershipID  int64
+	Decision      ApprovalDecision
+	DecidedAt     *time.Time
+	DecidedBy     *int64
+	Comment       string
+}
+
+type LoanApplicationGuarantor struct {
+	ID            int64
+	GroupID       int64
+	ApplicationID int64
+	MembershipID  int64
+	Amount        pgtype.Numeric
+	Comment       string
+	Decision      ApprovalDecision
+	DecidedAt     *time.Time
+	Reason        string
+}
+
+type LoanCharge struct {
+	ID          int64
+	GroupID     int64
+	LoanID      int64
+	Kind        LoanChargeKind
+	Number      *int32
+	InvoiceOn   time.Time
+	DueOn       time.Time
+	NextFineOn  *time.Time
+	Principal   pgtype.Numeric
+	Interest    pgtype.Numeric
+	Amount      pgtype.Numeric
+	ParentID    *int64
+	NoFines     bool
+	SentAt      *time.Time
+	Refs        []byte
+	LegacyType  *int16
+	GeneratedBy *string
+	CreatedBy   *int64
+	CreatedAt   time.Time
+	VoidedAt    *time.Time
+}
+
+type LoanGuarantor struct {
+	ID           int64
+	GroupID      int64
+	LoanID       int64
+	MembershipID int64
+	Amount       pgtype.Numeric
+	Comment      string
+	CreatedBy    *int64
+	CreatedAt    time.Time
+}
+
+type LoanRepayment struct {
+	ID           int64
+	GroupID      int64
+	LoanID       int64
+	MembershipID *int64
+	DepositID    *int64
+	AccountID    *int64
+	Method       NullPaymentMethod
+	Amount       pgtype.Numeric
+	PaidOn       time.Time
+	Source       string
+	Description  string
+	Refs         []byte
+	IsBackdated  bool
+	CreatedBy    *int64
+	CreatedAt    time.Time
+	VoidedAt     *time.Time
+	VoidedBy     *int64
+}
+
+type LoanType struct {
+	ID                int64
+	GroupID           int64
+	Name              string
+	InterestType      InterestType
+	InterestRate      pgtype.Numeric
+	RatePer           InterestRatePer
+	ReducingMethod    string
+	FixedInterest     pgtype.Numeric
+	FixedInterestRate pgtype.Numeric
+	Frequency         RepaymentFrequency
+	FixedTerm         *int32
+	MinTerm           *int32
+	MaxTerm           *int32
+	GracePeriods      int32
+	AmountBasis       string
+	MinAmount         pgtype.Numeric
+	MaxAmount         pgtype.Numeric
+	SavingsMultiple   pgtype.Numeric
+	Guarantors        string
+	MinGuarantors     *int32
+	MaxGuarantors     *int32
+	LateFine          []byte
+	BalanceFine       []byte
+	ProcessingFee     []byte
+	FineDeferment     bool
+	NeedsApproval     bool
+	IsHidden          bool
+	Settings          []byte
+	CreatedBy         *int64
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	DeletedAt         *time.Time
+}
+
 type LoginAttempt struct {
 	ID          int64
 	Identity    string
@@ -1501,6 +1992,7 @@ type Withdrawal struct {
 	CreatedAt         time.Time
 	VoidedAt          *time.Time
 	VoidedBy          *int64
+	LoanID            *int64
 }
 
 type WithdrawalApproval struct {

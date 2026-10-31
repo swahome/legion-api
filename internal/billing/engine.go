@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/swahome/legion-api/internal/books"
 	"github.com/swahome/legion-api/internal/store"
 )
 
@@ -39,6 +40,8 @@ type Summary struct {
 	FineRulesRun      int      `json:"fine_rules_run"`
 	FinesRaised       int64    `json:"fines_raised"`
 	FineRulesSkipped  int      `json:"fine_rules_skipped"` // too far behind, moved on
+	LoansFined        int      `json:"loans_fined"`
+	LoanFinesRaised   int64    `json:"loan_fines_raised"`
 	Problems          []string `json:"problems,omitempty"`
 }
 
@@ -104,6 +107,9 @@ func (e *Engine) Run(ctx context.Context, opts RunOptions) (Summary, error) {
 	if runErr == nil {
 		runErr = e.fine(ctx, today, &sum)
 	}
+	if runErr == nil {
+		runErr = e.fineLoans(ctx, today, &sum)
+	}
 	status, msg := "succeeded", ""
 	if runErr != nil {
 		status, msg = "failed", runErr.Error()
@@ -112,7 +118,7 @@ func (e *Engine) Run(ctx context.Context, opts RunOptions) (Summary, error) {
 	if err := q.FinishJobRun(context.WithoutCancel(ctx), store.FinishJobRunParams{ID: runID, Status: status, Summary: js, Error: msg}); err != nil && runErr == nil {
 		runErr = err
 	}
-	e.log.Info("billing run", "date", sum.Date, "status", status, "invoices", sum.InvoicesRaised, "fines", sum.FinesRaised, "problems", len(sum.Problems))
+	e.log.Info("billing run", "date", sum.Date, "status", status, "invoices", sum.InvoicesRaised, "fines", sum.FinesRaised, "loan_fines", sum.LoanFinesRaised, "problems", len(sum.Problems))
 	return sum, runErr
 }
 
@@ -242,6 +248,34 @@ func (e *Engine) fine(ctx context.Context, today time.Time, sum *Summary) error 
 		if err := e.fineRule(ctx, r, today, oldest, sum); err != nil {
 			sum.problem("fine rule %d on contribution %d (%s): %v", r.ID, r.ContributionID, r.Name, err)
 		}
+	}
+	return nil
+}
+
+// fineLoans raises late-payment and outstanding-balance fines on loans,
+// one loan per transaction.
+func (e *Engine) fineLoans(ctx context.Context, today time.Time, sum *Summary) error {
+	rows, err := store.New(e.pool).DueLoanFines(ctx, today)
+	if err != nil {
+		return err
+	}
+	oldest := today.AddDate(0, 0, -CatchUpDays)
+	for _, r := range rows {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		var n int64
+		err := e.tx(ctx, func(q *store.Queries) error {
+			var err error
+			n, err = books.ChargeLoanFines(ctx, q, r.GroupID, r.ID, today, oldest)
+			return err
+		})
+		if err != nil {
+			sum.problem("fines on loan %d: %v", r.ID, err)
+			continue
+		}
+		sum.LoansFined++
+		sum.LoanFinesRaised += n
 	}
 	return nil
 }

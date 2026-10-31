@@ -1,0 +1,355 @@
+package httpapi
+
+import (
+	"fmt"
+	"testing"
+	"time"
+)
+
+func TestLoanTypes(t *testing.T) {
+	f := newMoneyFixture(t)
+	for _, bad := range []map[string]any{
+		{"name": " ", "interest_type": "fixed_balance"},
+		{"name": "X", "interest_type": "magic"},
+		{"name": "X", "interest_type": "fixed_balance", "rate_per": "fortnight"},
+		{"name": "X", "interest_type": "fixed_balance", "fixed_term": 3, "min_term": 1},
+		{"name": "X", "interest_type": "fixed_balance", "amount_basis": "savings"},
+		{"name": "X", "interest_type": "fixed_balance", "guarantors": "always"},
+		{"name": "X", "interest_type": "fixed_balance", "late_fine": map[string]any{"kind": "fixed", "frequency": "monthly"}},
+		{"name": "X", "interest_type": "fixed_balance", "balance_fine": map[string]any{"kind": "percentage", "rate": 5, "rate_on": "installment_balance", "frequency": "monthly"}},
+		{"name": "X", "interest_type": "fixed_amount"},
+	} {
+		if r := f.post("/loan-types", bad); r.code != 400 {
+			t.Errorf("%v: %d %s", bad, r.code, r.raw)
+		}
+	}
+	expect(t, f.call("POST", f.memberTok, "/loan-types", map[string]any{"name": "Mine"}), 403)
+	r := f.post("/loan-types", map[string]any{
+		"name": "Normal", "interest_type": "fixed_balance", "interest_rate": 10, "rate_per": "month",
+		"min_term": 1, "max_term": 12, "min_amount": "1000", "max_amount": "100000",
+		"late_fine":      map[string]any{"kind": "fixed", "amount": "100", "frequency": "monthly"},
+		"processing_fee": map[string]any{"kind": "percentage", "rate": 2, "on": "amount"},
+	})
+	expect(t, r, 201)
+	id := int64(r.body["id"].(float64))
+	if r.body["late_fine"].(map[string]any)["scope"] != "installment" || r.body["needs_approval"] != true {
+		t.Errorf("created: %s", r.raw)
+	}
+	expect(t, f.post("/loan-types", map[string]any{"name": "normal", "interest_type": "fixed_balance"}), 400)
+	r = f.call("PATCH", f.officialTok, fmt.Sprintf("/loan-types/%d", id), map[string]any{
+		"name": "Normal", "interest_type": "reducing_balance", "interest_rate": 12, "rate_per": "year", "fixed_term": 6, "is_hidden": true,
+	})
+	expect(t, r, 200)
+	if r.body["interest_type"] != "reducing_balance" || r.body["fixed_term"] != float64(6) || r.body["late_fine"] != nil {
+		t.Errorf("patched: %s", r.raw)
+	}
+	if n := len(f.get(f.memberTok, "/loan-types").list("loan_types")); n != 0 {
+		t.Errorf("member sees hidden type")
+	}
+	if n := len(f.get(f.officialTok, "/loan-types?include_hidden=true").list("loan_types")); n != 1 {
+		t.Errorf("official list: %d", n)
+	}
+	expect(t, f.call("DELETE", f.officialTok, fmt.Sprintf("/loan-types/%d", id), nil), 204)
+	expect(t, f.call("DELETE", f.officialTok, fmt.Sprintf("/loan-types/%d", id), nil), 404)
+}
+
+func TestLoans(t *testing.T) {
+	f := newMoneyFixture(t)
+	bank := f.account(map[string]any{"kind": "bank", "name": "Equity", "institution_id": f.bank, "initial_balance": "100000"})
+	r := f.post("/loan-types", map[string]any{
+		"name": "Normal", "interest_type": "fixed_balance", "interest_rate": 10, "rate_per": "month",
+		"min_term": 1, "max_term": 12, "max_amount": "50000", "guarantors": "over_max", "min_guarantors": 1,
+		"processing_fee": map[string]any{"kind": "fixed", "amount": "200"},
+	})
+	expect(t, r, 201)
+	typeID := int64(r.body["id"].(float64))
+	day := time.Now().AddDate(0, -3, 0).Format(dateLayout)
+
+	// Preview: 12000 over 3 months at 10% a month flat = 3600 interest.
+	r = f.call("POST", f.memberTok, "/loans/preview", map[string]any{"loan_type_id": typeID, "amount": "12000", "installments": 3})
+	expect(t, r, 200)
+	if r.body["interest"] != "3600.00" || r.body["total"] != "15600.00" || r.body["processing_fee"] != "200.00" {
+		t.Fatalf("preview: %s", r.raw)
+	}
+
+	base := map[string]any{"member_id": f.member, "loan_type_id": typeID, "account_id": bank, "amount": "12000",
+		"disbursed_on": day, "installments": 3, "method": "cash"}
+	with := func(k string, v any) map[string]any {
+		m := map[string]any{}
+		for a, b := range base {
+			m[a] = b
+		}
+		m[k] = v
+		return m
+	}
+	for _, bad := range []map[string]any{
+		with("installments", 13), with("amount", "60000"), with("member_id", 999999),
+		with("account_id", 999999), with("disbursed_on", time.Now().AddDate(0, 0, 2).Format(dateLayout)),
+		with("guarantors", []map[string]any{{"member_id": f.member}}),
+	} {
+		if r := f.post("/loans", bad); r.code != 400 {
+			t.Errorf("%v: %d %s", bad, r.code, r.raw)
+		}
+	}
+	expect(t, f.call("POST", f.memberTok, "/loans", base), 403)
+
+	r = f.post("/loans", base)
+	expect(t, r, 201)
+	loanID := int64(r.body["id"].(float64))
+	tot := r.body["totals"].(map[string]any)
+	charges := r.list("charges")
+	if len(charges) != 3 || tot["payable"] != "15600.00" || tot["balance"] != "15600.00" || r.body["status"] != "arrears" {
+		t.Fatalf("loan: %s", r.raw)
+	}
+	if charges[0]["amount"] != "5200.00" || charges[0]["status"] != "overdue" {
+		t.Errorf("first installment: %v", charges[0])
+	}
+	// The bank paid out 12000 and took the 200 fee: 100000 - 12000 + 200.
+	if b := accountBalances(f.get(f.officialTok, "/accounts"))["Equity"]; b != "88200.00" {
+		t.Errorf("bank after loan: %s", b)
+	}
+
+	// A member sees their own loan, not someone else's.
+	expect(t, f.get(f.memberTok, fmt.Sprintf("/loans/%d", loanID)), 200)
+	officialLoan := f.post("/loans", with("member_id", f.official))
+	expect(t, officialLoan, 201)
+	expect(t, f.get(f.memberTok, fmt.Sprintf("/loans/%d", int64(officialLoan.body["id"].(float64)))), 404)
+	if n := len(pagedItems(f.get(f.memberTok, "/loans"), "loans")); n != 1 {
+		t.Errorf("member loan list: %d", n)
+	}
+
+	// Repay 6000: the first installment is cleared and 800 goes on the second.
+	path := fmt.Sprintf("/loans/%d/repayments", loanID)
+	expect(t, f.post(path, map[string]any{"account_id": bank, "amount": "0", "paid_on": day}), 400)
+	r = f.post(path, map[string]any{"account_id": bank, "amount": "6000", "paid_on": day, "method": "mpesa"})
+	expect(t, r, 201)
+	charges = r.list("charges")
+	if charges[0]["status"] != "paid" || charges[1]["paid"] != "800.00" || r.body["totals"].(map[string]any)["balance"] != "9600.00" {
+		t.Fatalf("after repayment: %s", r.raw)
+	}
+	reps := r.list("repayments")
+	repID := int64(reps[0]["id"].(float64))
+	stmt := r.list("statement")
+	if last := stmt[len(stmt)-1]; last["balance"] != "9600.00" {
+		t.Errorf("statement: %v", stmt)
+	}
+	// The repayment is a deposit too; voiding it there voids the repayment.
+	depID := int64(reps[0]["deposit_id"].(float64))
+	expect(t, f.post(fmt.Sprintf("/deposits/%d/void", depID), nil), 200)
+	r = f.get(f.officialTok, fmt.Sprintf("/loans/%d", loanID))
+	if r.body["totals"].(map[string]any)["paid"] != "0.00" {
+		t.Errorf("deposit void did not void the repayment: %s", r.raw)
+	}
+	expect(t, f.post(fmt.Sprintf("/loans/%d/repayments/%d/void", loanID, repID), nil), 409)
+
+	// Pay it all off.
+	r = f.post(path, map[string]any{"account_id": bank, "amount": "15600", "paid_on": day})
+	expect(t, r, 201)
+	if r.body["status"] != "paid" {
+		t.Errorf("paid off: %s", r.raw)
+	}
+	r = f.get(f.officialTok, "/loans?status=paid")
+	if n := len(pagedItems(r, "loans")); n != 1 {
+		t.Errorf("paid filter: %s", r.raw)
+	}
+
+	// The disbursement cannot be voided on its own; voiding the loan undoes everything.
+	wd := pagedItems(f.get(f.officialTok, "/withdrawals?kind=loan_disbursement"), "withdrawals")
+	wid := int64(wd[0]["id"].(float64))
+	expect(t, f.post(fmt.Sprintf("/withdrawals/%d/void", wid), nil), 409)
+	expect(t, f.post(fmt.Sprintf("/loans/%d/void", loanID), nil), 200)
+	expect(t, f.post(fmt.Sprintf("/loans/%d/void", loanID), nil), 409)
+	expect(t, f.post(path, map[string]any{"account_id": bank, "amount": "10", "paid_on": day}), 409)
+	// Only the official's loan is left: 100000 - 12000 + 200.
+	if b := accountBalances(f.get(f.officialTok, "/accounts"))["Equity"]; b != "88200.00" {
+		t.Errorf("bank after void: %s", b)
+	}
+
+	// Without a loan type, every term is given.
+	r = f.post("/loans", map[string]any{"member_id": f.member, "account_id": bank, "amount": "10000",
+		"disbursed_on": day, "installments": 4, "interest_type": "reducing_balance", "interest_rate": 12, "rate_per": "year",
+		"late_fine": map[string]any{"kind": "percentage", "rate": 5, "rate_on": "installment_balance", "frequency": "monthly"}})
+	expect(t, r, 201)
+	charges = r.list("charges")
+	var principal float64
+	for _, c := range charges {
+		var p float64
+		fmt.Sscan(c["principal"].(string), &p)
+		principal += p
+	}
+	if len(charges) != 4 || principal != 10000 {
+		t.Errorf("reducing loan principal %v: %s", principal, r.raw)
+	}
+}
+
+func pagedItems(r *httpResult, key string) []map[string]any {
+	var out []map[string]any
+	for _, x := range r.body[key].(map[string]any)["items"].([]any) {
+		out = append(out, x.(map[string]any))
+	}
+	return out
+}
+
+func TestLoanFines(t *testing.T) {
+	f := newMoneyFixture(t)
+	bank := f.account(map[string]any{"kind": "bank", "name": "Equity", "institution_id": f.bank, "initial_balance": "100000"})
+	// 12000 over 2 months at 10% a month flat: 7200 due on 10 Feb and 10 Mar 2025.
+	r := f.post("/loans", map[string]any{"member_id": f.member, "account_id": bank, "amount": "12000",
+		"disbursed_on": "2025-01-10", "installments": 2, "interest_type": "fixed_balance", "interest_rate": 10, "rate_per": "month",
+		"late_fine":    map[string]any{"kind": "fixed", "amount": "100", "frequency": "daily"},
+		"balance_fine": map[string]any{"kind": "fixed", "amount": "500", "frequency": "monthly"}})
+	expect(t, r, 201)
+	loanID := int64(r.body["id"].(float64))
+	path := fmt.Sprintf("/loans/%d", loanID)
+	fines := func() (n int, total float64) {
+		for _, c := range f.get(f.officialTok, path).list("charges") {
+			if c["kind"] != "installment" {
+				var a float64
+				fmt.Sscan(c["amount"].(string), &a)
+				n, total = n+1, total+a
+			}
+		}
+		return
+	}
+
+	// Fines start the day after the due date: 11, 12 and 13 February.
+	if s := f.bill("2025-02-13"); s.LoanFinesRaised != 3 || s.LoansFined != 1 {
+		t.Fatalf("first run: %+v", s)
+	}
+	if s := f.bill("2025-02-13"); s.LoanFinesRaised != 0 {
+		t.Errorf("repeat run raised %d", s.LoanFinesRaised)
+	}
+	if n, total := fines(); n != 3 || total != 300 {
+		t.Errorf("fines %d %v", n, total)
+	}
+	// Paying the installment and its fines stops the late fines on it.
+	expect(t, f.post(path+"/repayments", map[string]any{"account_id": bank, "amount": "7500", "paid_on": "2025-02-13"}), 201)
+	if s := f.bill("2025-02-14"); s.LoanFinesRaised != 0 {
+		t.Errorf("fined a paid installment: %+v", s)
+	}
+	// The second installment falls due on 10 March: late fines on 11 and 12
+	// March, and the outstanding-balance fine from 11 March, the day after the
+	// loan ends. A run more than a week late doesn't back-bill.
+	if s := f.bill("2025-03-12"); s.LoanFinesRaised != 3 {
+		t.Errorf("March run: %+v", s)
+	}
+	if n, total := fines(); n != 6 || total != 1000 {
+		t.Errorf("fines after March %d %v", n, total)
+	}
+	if s := f.bill("2025-06-30"); s.LoanFinesRaised != 8 {
+		// Only 23-30 June's daily late fines; the balance fines of 11 April,
+		// May and June are older than a week and are skipped.
+		t.Errorf("late run: %+v", s)
+	}
+	// A waived fine stays waived on a re-run.
+	var fineID int64
+	for _, c := range f.get(f.officialTok, path).list("charges") {
+		if c["kind"] == "late_fine" {
+			fineID = int64(c["id"].(float64))
+		}
+	}
+	expect(t, f.post(fmt.Sprintf("%s/fines/%d/void", path, fineID), nil), 200)
+	if s := f.bill("2025-06-30"); s.LoanFinesRaised != 0 {
+		t.Errorf("re-raised a waived fine: %+v", s)
+	}
+}
+
+func TestLoanApplications(t *testing.T) {
+	f := newMoneyFixture(t)
+	bank := f.account(map[string]any{"kind": "bank", "name": "Equity", "institution_id": f.bank, "initial_balance": "100000"})
+	r := f.post("/loan-types", map[string]any{"name": "Normal", "interest_type": "fixed_balance", "interest_rate": 10,
+		"rate_per": "month", "min_term": 1, "max_term": 6, "max_amount": "50000", "guarantors": "always", "min_guarantors": 1})
+	expect(t, r, 201)
+	typeID := f.id(r)
+	apply := map[string]any{"loan_type_id": typeID, "amount": "12000", "installments": 3, "description": "School fees",
+		"guarantors": []map[string]any{{"member_id": f.official, "amount": "6000", "comment": "My neighbour"}}}
+
+	for name, bad := range map[string]map[string]any{
+		"no guarantor": {"loan_type_id": typeID, "amount": "12000", "installments": 3},
+		"too long":     {"loan_type_id": typeID, "amount": "12000", "installments": 9, "guarantors": apply["guarantors"]},
+		"too much":     {"loan_type_id": typeID, "amount": "60000", "installments": 3, "guarantors": apply["guarantors"]},
+		"self":         {"loan_type_id": typeID, "amount": "100", "installments": 3, "guarantors": []map[string]any{{"member_id": f.member}}},
+	} {
+		if r := f.call("POST", f.memberTok, "/loan-applications", bad); r.code != 400 {
+			t.Errorf("%s: %d %s", name, r.code, r.raw)
+		}
+	}
+	expect(t, f.call("POST", f.memberTok, "/loan-applications", map[string]any{"member_id": f.official, "loan_type_id": typeID}), 403)
+
+	// Otieno applies; Jane is asked to guarantee.
+	r = f.call("POST", f.memberTok, "/loan-applications", apply)
+	expect(t, r, 201)
+	app := f.id(r)
+	path := fmt.Sprintf("/loan-applications/%d", app)
+	if r.body["status"] != "pending_guarantors" || r.body["can_cancel"] != true ||
+		r.body["schedule"].(map[string]any)["total"] != "15600.00" {
+		t.Fatalf("applied: %s", r.raw)
+	}
+	if g := f.get(f.officialTok, "/"); g.body["loan_applications_awaiting_me"] != float64(1) {
+		t.Errorf("awaiting jane: %s", g.raw)
+	}
+	expect(t, f.call("POST", f.memberTok, path+"/guarantee", map[string]any{"approve": true}), 409)
+	expect(t, f.call("POST", f.officialTok, path+"/guarantee", map[string]any{"approve": false}), 400)
+	// Jane guarantees. Otieno is a signatory too, so his own approval counts
+	// and the application waits on Jane as signatory.
+	secretary := f.scalar(`INSERT INTO group_roles (group_id, name) VALUES ($1, 'Secretary') RETURNING id`, f.group)
+	f.exec(`UPDATE memberships SET group_role_id = $1 WHERE id = $2`, secretary, f.member)
+	r = f.call("POST", f.officialTok, path+"/guarantee", map[string]any{"approve": true})
+	expect(t, r, 200)
+	if r.body["status"] != "pending_approval" || len(r.body["approval_list"].([]any)) != 2 || r.body["my_guarantee"] != "approved" {
+		t.Fatalf("guaranteed: %s", r.raw)
+	}
+	expect(t, f.post(path+"/disburse", map[string]any{"account_id": bank}), 409)
+	expect(t, f.post(path+"/approve", map[string]any{"password": "wrong"}), 401)
+	r = f.post(path+"/approve", map[string]any{"password": "pw"})
+	expect(t, r, 200)
+	if r.body["status"] != "approved" || r.body["can_disburse"] != true {
+		t.Fatalf("approved: %s", r.raw)
+	}
+	expect(t, f.call("POST", f.memberTok, path+"/disburse", map[string]any{"account_id": bank}), 403)
+	r = f.post(path+"/disburse", map[string]any{"account_id": bank, "disbursed_on": time.Now().Format(dateLayout), "method": "mpesa"})
+	expect(t, r, 200)
+	if r.body["status"] != "disbursed" || r.body["loan_id"] == nil {
+		t.Fatalf("disbursed: %s", r.raw)
+	}
+	loan := f.get(f.memberTok, fmt.Sprintf("/loans/%d", int64(r.body["loan_id"].(float64))))
+	expect(t, loan, 200)
+	if gs := loan.list("guarantors"); len(gs) != 1 || gs[0]["amount"] != "6000.00" || loan.body["description"] != "School fees" {
+		t.Errorf("loan from application: %s", loan.raw)
+	}
+	expect(t, f.post(path+"/disburse", map[string]any{"account_id": bank}), 409)
+
+	// A guarantor's decline declines it; the applicant can cancel an open one.
+	r = f.call("POST", f.memberTok, "/loan-applications", apply)
+	second := fmt.Sprintf("/loan-applications/%d", f.id(r))
+	r = f.call("POST", f.officialTok, second+"/guarantee", map[string]any{"approve": false, "reason": "Not this time"})
+	if r.body["status"] != "declined" || r.body["decline_reason"] != "A guarantor declined: Not this time" {
+		t.Errorf("declined: %s", r.raw)
+	}
+	r = f.call("POST", f.memberTok, "/loan-applications", apply)
+	third := fmt.Sprintf("/loan-applications/%d", f.id(r))
+	r = f.call("POST", f.memberTok, third+"/cancel", nil)
+	if r.body["status"] != "cancelled" {
+		t.Errorf("cancelled: %s", r.raw)
+	}
+	expect(t, f.call("POST", f.memberTok, third+"/cancel", nil), 409)
+
+	if n := len(pagedItems(f.get(f.memberTok, "/loan-applications"), "loan_applications")); n != 3 {
+		t.Errorf("member list: %d", n)
+	}
+	if n := len(pagedItems(f.get(f.officialTok, "/loan-applications?status=open"), "loan_applications")); n != 0 {
+		t.Errorf("open list: %d", n)
+	}
+
+	// Without signatories a type that needs approval can't take applications;
+	// one that doesn't is approved as soon as the guarantors agree.
+	f.exec(`UPDATE memberships SET group_role_id = NULL WHERE group_id = $1`, f.group)
+	expect(t, f.call("POST", f.memberTok, "/loan-applications", apply), 409)
+	f.exec(`UPDATE loan_types SET needs_approval = false WHERE id = $1`, typeID)
+	r = f.call("POST", f.memberTok, "/loan-applications", apply)
+	expect(t, r, 201)
+	r = f.call("POST", f.officialTok, fmt.Sprintf("/loan-applications/%d/guarantee", f.id(r)), map[string]any{"approve": true})
+	if r.body["status"] != "approved" {
+		t.Errorf("no approval needed: %s", r.raw)
+	}
+}

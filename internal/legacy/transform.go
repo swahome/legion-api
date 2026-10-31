@@ -25,6 +25,7 @@ var DumpTables = []string{
 	"income_categories", "expense_categories", "fine_categories", "depositors",
 	"deposits", "withdrawals", "account_transfers", "transaction_statements",
 	"withdrawal_requests", "withdrawal_approval_requests",
+	"loan_types", "loans", "loan_invoices", "loan_repayments", "loan_guarantors",
 }
 
 // Options control how legacy values are mapped.
@@ -48,6 +49,7 @@ type Plan struct {
 	IncomeCategories, ExpenseCategories, FineCategories, Depositors  [][]any
 	Deposits, Withdrawals, AccountTransfers, AccountEntries          [][]any
 	WithdrawalRequests, WithdrawalApprovals                          [][]any
+	LoanTypes, Loans, LoanCharges, LoanRepayments, LoanGuarantors    [][]any
 
 	Report Report
 }
@@ -174,8 +176,13 @@ func Transform(t Tables, roles []Row, opt Options, now time.Time) (*Plan, error)
 		saccoBranches: saccoBranches, providers: providers, members: members, contribs: contribs}
 	accounts := p.accounts(t, ref, now)
 	income, expense, fines, depositors := p.categories(t, groups, now)
-	deposits := p.deposits(t["deposits"], ref, accounts, income, fines, depositors, now)
-	withdrawals := p.withdrawals(t["withdrawals"], ref, accounts, expense, now)
+	loanTypes := p.loanTypes(t["loan_types"], ref, now)
+	loanSet := p.loans(t["loans"], t["loan_invoices"], ref, accounts, loanTypes, now)
+	p.loanCharges(t["loan_invoices"], ref, loanSet, now)
+	p.loanGuarantors(t["loan_guarantors"], ref, loanSet, now)
+	deposits, repaymentDeposit := p.deposits(t["deposits"], ref, accounts, income, fines, depositors, loanSet, now)
+	p.loanRepayments(t["loan_repayments"], ref, accounts, loanSet, repaymentDeposit, deposits, now)
+	withdrawals := p.withdrawals(t["withdrawals"], ref, accounts, expense, loanSet, now)
 	transfers := p.accountTransfers(t["account_transfers"], ref, accounts, now)
 	p.accountEntries(t["transaction_statements"], ref, accounts, deposits, withdrawals, transfers, now)
 	requests := p.withdrawalRequests(t["withdrawal_requests"], ref, accounts, expense, now)
@@ -198,6 +205,8 @@ func Transform(t Tables, roles []Row, opt Options, now time.Time) (*Plan, error)
 		"depositors": p.Depositors, "deposits": p.Deposits, "withdrawals": p.Withdrawals,
 		"account_transfers": p.AccountTransfers, "account_entries": p.AccountEntries,
 		"withdrawal_requests": p.WithdrawalRequests, "withdrawal_approvals": p.WithdrawalApprovals,
+		"loan_types": p.LoanTypes, "loans": p.Loans, "loan_charges": p.LoanCharges,
+		"loan_repayments": p.LoanRepayments, "loan_guarantors": p.LoanGuarantors,
 	} {
 		p.Report.Imported[name] = len(rows)
 	}

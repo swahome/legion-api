@@ -76,6 +76,10 @@ func (s *Server) getMemberDashboardData(ctx context.Context, c *call, g *member)
 	} else if name != "" {
 		role = name
 	}
+	mine, err := s.loanBook(ctx, g, &g.m.ID)
+	if err != nil {
+		return nil, err
+	}
 	recent, err := s.recentDeposits(ctx, g, &g.m.ID, 5)
 	if err != nil {
 		return nil, err
@@ -92,7 +96,7 @@ func (s *Server) getMemberDashboardData(ctx context.Context, c *call, g *member)
 		"member_details": map[string]any{
 			"total_contributions":         t.contributions,
 			"total_fines":                 t.fines,
-			"total_loan_balances":         0,
+			"total_loan_balances":         float64(mine.balance) / 100,
 			"contribution_arrears":        ca,
 			"fine_arrears":                fa,
 			"total_arrears":               total,
@@ -155,15 +159,19 @@ func (s *Server) getGroupDashboardData(ctx context.Context, c *call, g *member) 
 	if err != nil {
 		return nil, err
 	}
+	lb, err := s.loanBook(ctx, g, nil)
+	if err != nil {
+		return nil, err
+	}
 	return map[string]any{
 		"status": 1,
 		"time":   s.now().Unix(),
 		"group_details": map[string]any{
 			"total_contributions":    contributions,
 			"total_fines":            fines,
-			"total_loan_balances":    0,
-			"total_loaned_amount":    0,
-			"total_loan_repaid":      0,
+			"total_loan_balances":    float64(lb.balance) / 100,
+			"total_loaned_amount":    float64(lb.lent) / 100,
+			"total_loan_repaid":      float64(lb.repaid) / 100,
 			"total_expense_payments": amount(expenses),
 			"bank_balances":          bank,
 			"cash_balances":          cash,

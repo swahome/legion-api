@@ -82,7 +82,8 @@ db/migrations    goose SQL migrations (embedded)
 db/queries       sqlc query files
 internal/auth    login, throttling, tokens, refresh rotation
 internal/billing nightly invoicing and fines, and the in-process scheduler
-internal/books   money writes shared by the web and mobile APIs: deposits, withdrawals, transfers, fines
+internal/books   money writes shared by the web and mobile APIs: deposits, withdrawals, transfers, fines, loans
+internal/loans   loan schedules, fine and fee rules, repayment allocation
 internal/config  .env and environment settings
 internal/httpapi chi routes and handlers
 internal/legacy  MySQL dump reader and the legacy data import

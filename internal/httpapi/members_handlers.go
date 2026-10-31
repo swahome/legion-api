@@ -30,7 +30,10 @@ type groupResponse struct {
 	// counts the ones waiting on them.
 	IsSignatory bool  `json:"is_signatory"`
 	AwaitingMe  int64 `json:"withdrawal_requests_awaiting_me"`
-	Summary     struct {
+	// LoanApplicationsAwaitingMe counts applications waiting on the
+	// caller as a guarantor or signatory.
+	LoanApplicationsAwaitingMe int64 `json:"loan_applications_awaiting_me"`
+	Summary                    struct {
 		ActiveMembers          int64  `json:"active_members"`
 		Officials              int64  `json:"officials"`
 		ActiveContributions    int64  `json:"active_contributions"`
@@ -59,6 +62,10 @@ func (s *Server) getGroup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if resp.AwaitingMe, err = s.q.CountAwaitingApprovals(r.Context(), *a.MembershipID); err != nil {
+			writeInternal(w, r, err)
+			return
+		}
+		if resp.LoanApplicationsAwaitingMe, err = s.q.CountLoanApplicationsAwaiting(r.Context(), *a.MembershipID); err != nil {
 			writeInternal(w, r, err)
 			return
 		}
