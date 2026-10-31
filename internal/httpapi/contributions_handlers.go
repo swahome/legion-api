@@ -2,12 +2,15 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/swahome/legion-api/internal/billing"
 	"github.com/swahome/legion-api/internal/store"
 )
 
@@ -20,8 +23,9 @@ type scheduleResponse struct {
 	SMSNotifications   *bool   `json:"sms_notifications,omitempty"`
 	EmailNotifications *bool   `json:"email_notifications,omitempty"`
 	FinesEnabled       *bool   `json:"fines_enabled"`
-	// Rule holds the legacy day/week picker settings until invoicing is ported.
-	Rule []byte `json:"rule,omitempty"`
+	// Rule is the day picker (which day of the month or week), in the
+	// legacy encoding; see billing.Rule.
+	Rule json.RawMessage `json:"rule,omitempty"`
 }
 
 type fineRuleResponse struct {
@@ -35,6 +39,10 @@ type fineRuleResponse struct {
 	Frequency      *string `json:"frequency"`
 	FineLimit      *int32  `json:"fine_limit"`
 	IsActive       bool    `json:"is_active"`
+	// Detail view: notifications and the next day the rule charges.
+	SMSNotifications   bool  `json:"sms_notifications"`
+	EmailNotifications bool  `json:"email_notifications"`
+	NextFineDate       *Date `json:"next_fine_date"`
 }
 
 type contributionResponse struct {
@@ -158,7 +166,8 @@ func (s *Server) loadContribution(ctx context.Context, a groupAccess, id int64) 
 			ID: f.ID, Kind: string(f.Kind), FixedAmount: numericMoney(f.FixedAmount),
 			PercentageRate: numericString(f.PercentageRate), PercentageOf: f.PercentageOf,
 			ChargeableOn: f.ChargeableOn, Mode: f.Mode, Frequency: f.Frequency, FineLimit: f.FineLimit,
-			IsActive: f.IsActive,
+			IsActive: f.IsActive, SMSNotifications: f.SmsNotifications, EmailNotifications: f.EmailNotifications,
+			NextFineDate: datePtr(f.NextFineDate),
 		})
 	}
 	return cr, nil
@@ -173,6 +182,9 @@ type scheduleRequest struct {
 	SMSNotifications   bool    `json:"sms_notifications"`
 	EmailNotifications bool    `json:"email_notifications"`
 	FinesEnabled       bool    `json:"fines_enabled"`
+	// Rule replaces the day picker when present (see billing.Rule); values
+	// may be numbers or strings.
+	Rule json.RawMessage `json:"rule"`
 }
 
 type contributionRequest struct {
@@ -185,6 +197,9 @@ type contributionRequest struct {
 	AppliesToAllMembers *bool            `json:"applies_to_all_members"`
 	MemberIDs           []int64          `json:"member_ids"`
 	Schedule            *scheduleRequest `json:"schedule"`
+	// FineRules, when present, replaces the late-payment fine rules
+	// (regular contributions only). Rules sent with an id are updated.
+	FineRules *[]fineRuleRequest `json:"fine_rules"`
 }
 
 var validFrequencies = map[string]bool{}
@@ -229,8 +244,32 @@ func (req *contributionRequest) validate(kind string, create bool) (code, msg st
 		if sch.InvoiceDate != nil && sch.InvoiceDate.After(sch.ContributionDate.Time) {
 			return "invalid_schedule", "The invoice date must not be after the contribution date."
 		}
+		if sch.InvoiceDaysBefore != nil && (*sch.InvoiceDaysBefore < 0 || *sch.InvoiceDaysBefore > 60) {
+			return "invalid_schedule", "invoice_days_before must be between 0 and 60."
+		}
+		if len(sch.Rule) > 0 && string(sch.Rule) != "null" {
+			rule, err := billing.ParseRule(sch.Rule)
+			if err != nil {
+				return "invalid_schedule", "rule must be an object of day picker settings."
+			}
+			if kind == "regular" {
+				if _, err := billing.Next(*sch.Frequency, rule, sch.ContributionDate.Time, sch.ContributionDate.Time); err != nil {
+					return "invalid_schedule", "The day picker gives no contribution date: " + err.Error() + "."
+				}
+			}
+		}
 	} else if create && kind == "regular" {
 		return "invalid_schedule", "Regular contributions need a schedule."
+	}
+	if req.FineRules != nil {
+		if kind != "regular" && len(*req.FineRules) > 0 {
+			return "invalid_fine_rule", "Only regular contributions have late-payment fines."
+		}
+		for i := range *req.FineRules {
+			if code, msg := (*req.FineRules)[i].validate(); code != "" {
+				return code, msg
+			}
+		}
 	}
 	return "", ""
 }
@@ -266,8 +305,7 @@ func (s *Server) createContribution(w http.ResponseWriter, r *http.Request) {
 		}
 		return s.writeContributionExtras(r.Context(), q, a.Group.ID, id, &req)
 	})
-	if err != nil {
-		writeInternal(w, r, err)
+	if writeMoneyError(w, r, err) {
 		return
 	}
 	c, err := s.loadContribution(r.Context(), a, id)
@@ -323,8 +361,7 @@ func (s *Server) updateContribution(w http.ResponseWriter, r *http.Request) {
 		}
 		return s.writeContributionExtras(r.Context(), q, a.Group.ID, cid, &req)
 	})
-	if err != nil {
-		writeInternal(w, r, err)
+	if writeMoneyError(w, r, err) {
 		return
 	}
 	c, err := s.loadContribution(r.Context(), a, cid)
@@ -338,7 +375,21 @@ func (s *Server) updateContribution(w http.ResponseWriter, r *http.Request) {
 // writeContributionExtras replaces the schedule and member list when the
 // request includes them.
 func (s *Server) writeContributionExtras(ctx context.Context, q *store.Queries, groupID, id int64, req *contributionRequest) error {
+	var oldDue *time.Time
+	if old, err := q.GetContributionSchedule(ctx, id); err == nil {
+		oldDue = old.ContributionDate
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
 	if sch := req.Schedule; sch != nil {
+		if sch.InvoiceDate == nil {
+			// Default the invoice date from the days-before setting.
+			d := sch.ContributionDate.Time
+			if sch.InvoiceDaysBefore != nil {
+				d = d.AddDate(0, 0, -int(*sch.InvoiceDaysBefore))
+			}
+			sch.InvoiceDate = &Date{d}
+		}
 		p := store.UpsertContributionScheduleParams{
 			ContributionID:     id,
 			InvoiceDate:        sch.InvoiceDate.timePtr(),
@@ -352,9 +403,17 @@ func (s *Server) writeContributionExtras(ctx context.Context, q *store.Queries, 
 		if sch.Frequency != nil {
 			p.Frequency = store.NullContributionFrequency{ContributionFrequency: store.ContributionFrequency(*sch.Frequency), Valid: true}
 		}
+		if len(sch.Rule) > 0 && string(sch.Rule) != "null" {
+			rule, _ := billing.ParseRule(sch.Rule)
+			p.Rule = rule.JSON()
+		}
 		if err := q.UpsertContributionSchedule(ctx, p); err != nil {
 			return err
 		}
+	}
+	dueMoved := req.Schedule != nil && (oldDue == nil || !oldDue.Equal(req.Schedule.ContributionDate.Time))
+	if err := writeFineRules(ctx, q, id, req.FineRules, dueMoved); err != nil {
+		return err
 	}
 	if req.MemberIDs != nil {
 		if err := q.DeleteContributionMembers(ctx, id); err != nil {

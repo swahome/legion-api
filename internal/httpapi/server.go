@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/swahome/legion-api/internal/auth"
+	"github.com/swahome/legion-api/internal/billing"
 	"github.com/swahome/legion-api/internal/store"
 )
 
@@ -22,12 +23,14 @@ type Server struct {
 	cookieSecure       bool
 	defaultCallingCode string
 	mobile             http.Handler
+	billing            *billing.Engine
+	location           *time.Location
 }
 
 func New(pool *pgxpool.Pool, authSvc *auth.Service, cookieSecure bool) *Server {
 	return &Server{
 		pool: pool, q: store.New(pool), auth: authSvc, cookieSecure: cookieSecure,
-		defaultCallingCode: authSvc.DefaultCallingCode(),
+		defaultCallingCode: authSvc.DefaultCallingCode(), location: nairobi(),
 	}
 }
 
@@ -97,6 +100,8 @@ func (s *Server) Routes() http.Handler {
 				r.Get("/banks/{bankID}/branches", s.listBranches)
 				r.Post("/banks/{bankID}/branches", s.createBranch)
 				r.Patch("/banks/{bankID}/branches/{branchID}", s.updateBranch)
+				r.Get("/jobs", s.adminListJobRuns)
+				r.Post("/jobs/billing/run", s.adminRunBilling)
 			})
 
 			r.Route("/groups/{groupID}", func(r chi.Router) {
@@ -120,6 +125,8 @@ func (s *Server) Routes() http.Handler {
 				r.Get("/withdrawal-requests/{requestID}", s.getWithdrawalRequest)
 				r.Post("/withdrawal-requests/{requestID}/approve", s.approveWithdrawalRequest)
 				r.Post("/withdrawal-requests/{requestID}/decline", s.declineWithdrawalRequest)
+				r.Get("/fines", s.listFines)
+				r.Get("/fine-balances", s.fineBalances)
 
 				r.Group(func(r chi.Router) {
 					r.Use(requireOfficial)
@@ -160,6 +167,8 @@ func (s *Server) Routes() http.Handler {
 					r.Post("/withdrawal-requests", s.createWithdrawalRequest)
 					r.Post("/withdrawal-requests/{requestID}/cancel", s.cancelWithdrawalRequest)
 					r.Post("/withdrawal-requests/{requestID}/pay", s.payWithdrawalRequest)
+					r.Post("/fines", s.fineMembers)
+					r.Post("/fines/{fineID}/void", s.voidFine)
 				})
 			})
 		})

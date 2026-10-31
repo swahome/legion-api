@@ -28,8 +28,8 @@ someone takes effect immediately, without waiting for their token to expire.
 | GET | `/members/{id}/statement?from=&to=&contribution_id=` | self or official | Contribution statement with debit, credit and running balance per entry, opening and closing balance for the window, and lifetime totals per contribution. Contributions marked `hidden_in_statement` are shown to officials only |
 | GET | `/contributions` | member | Hidden contributions are for officials only |
 | GET | `/contributions/{id}` | member | Includes the schedule, fine rules and member list (when it doesn't apply to everyone) |
-| POST | `/contributions` | official | `name`, `kind` (`regular`, `one_time` or `non_scheduled`), `amount`, optional `category`, `applies_to_all_members`, `member_ids`, `schedule`. Regular contributions need `schedule.frequency` and `schedule.contribution_date` |
-| PATCH | `/contributions/{id}` | official | Any field except `kind`. `schedule` and `member_ids` replace the existing ones when sent |
+| POST | `/contributions` | official | `name`, `kind` (`regular`, `one_time` or `non_scheduled`), `amount`, optional `category`, `applies_to_all_members`, `member_ids`, `schedule`, `fine_rules`. Regular contributions need `schedule.frequency` and `schedule.contribution_date`. `schedule.invoice_date` defaults to `invoice_days_before` days before the contribution date |
+| PATCH | `/contributions/{id}` | official | Any field except `kind`. `schedule`, `member_ids` and `fine_rules` replace the existing ones when sent. A fine rule sent with its `id` is updated; rules left out are deleted |
 | GET | `/contribution-balances` | official | Every active member's payable, paid and balance, most in arrears first |
 
 ### Money (milestone 3)
@@ -59,6 +59,10 @@ someone takes effect immediately, without waiting for their token to expire.
 | POST | `/withdrawal-requests/{id}/decline` | signatory | `password`, `reason` |
 | POST | `/withdrawal-requests/{id}/cancel` | official | Optional `reason`. Pending or approved requests only |
 | POST | `/withdrawal-requests/{id}/pay` | official | Records the money leaving an approved request: `date`, optional `method`. Writes the withdrawal (or transfer) and sets `withdrawal_id` or `transfer_id` |
+| GET | `/fines?member_id=&kind=&from=&to=&include_voided=&page=&page_size=` | member (own) or official | Fines, newest first, paged. `kind` is `fine` (raised by an official, with a `fine_category`) or `contribution_fine` (a late-payment fine on a contribution, `automatic` when the billing job raised it, with the fined invoice's `invoice_due_date`) |
+| GET | `/fine-balances` | member (own) or official | Each active member's fines `fined`, `paid` and `balance`, plus `total_owed` |
+| POST | `/fines` | official | Fine members: `member_ids` (up to 500), `fine_category_id`, `amount`, `date` (not in the future), optional `description`. Returns `fine_ids` |
+| POST | `/fines/{id}/void` | official | 204; 404 if not found or already voided |
 | GET | `/income-categories`, `/expense-categories`, `/fine-categories` | member | Active, visible ones. Officials can add `?all=true` |
 | POST, PATCH | `/income-categories[/{id}]`, `/expense-categories[/{id}]`, `/fine-categories[/{id}]` | official | `name`, `description`, `is_hidden`, `is_active`; fine categories also take `amount` |
 | GET, POST, PATCH | `/depositors[/{id}]` | official | Outside payers for income: `name`, `email`, `phone`, `description`, `is_active` |
@@ -84,5 +88,18 @@ and the legacy type codes.
 - Dates are `YYYY-MM-DD` calendar dates in the group's timezone (Africa/Nairobi).
 - A positive balance means the member owes the group. A negative one means they're
   ahead.
-- The `schedule.rule` object carries the legacy day and week picker settings. It's
-  read-only until the invoicing engine is ported.
+- `schedule.rule` is the day picker, in the legacy setting names: for example
+  `{"month_day_monthly": 5}` (the 5th), `{"month_day_monthly": 2, "week_day_monthly": 3}`
+  (the 2nd Tuesday; weekdays run 1 = Sunday to 7 = Saturday, and 32 means "last"),
+  `{"week_day_weekly": 6}` (every Friday), or `start_month_multiple` with
+  `month_day_multiple` and `week_day_multiple` for bimonthly to yearly. See
+  `internal/billing/schedule.go` and `docs/schema/billing.md`.
+- A fine rule is `kind` (`fixed` with `fixed_amount`, or `percentage` with
+  `percentage_rate` and `percentage_of`: `"1"` contribution amount, `"2"` unpaid
+  balance, `"3"` balance plus unpaid fines), `chargeable_on` (`"1"` to `"56"` days
+  after the contribution date, `last_day_of_the_month` or `first_day_of_the_month`),
+  `mode` (`"1"` a fine per unpaid invoice, `"2"` one fine on the balance),
+  `frequency` (`"0"` once, `"1"` daily, `"2"` weekly, `"3"` monthly, `"4"` quarterly,
+  `"5"` half-yearly, `"6"` yearly), `fine_limit` (fines per invoice, 0 = no limit),
+  `is_active`. The response adds `next_fine_date`. Fines are charged only while the
+  schedule has `fines_enabled`.

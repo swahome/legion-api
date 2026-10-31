@@ -35,8 +35,12 @@ the binary and a `.env` file to the server:
 ./legion-api                # serve
 ./legion-api create-user -phone 0700000001 -password ... -admin
 ./legion-api import-legacy -dump chamasoft.sql   # see docs/data/legacy-import.md
+./legion-api billing-run [-date 2026-10-31]      # raise the day's invoices and fines by hand
 ./legion-api version
 ```
+
+The server raises contribution invoices and late-payment fines itself every night
+at `LEGION_BILLING_AT` (see `docs/schema/billing.md`); no cron entry is needed.
 
 The binary reads `./.env` from its working directory, or the file named by
 `LEGION_ENV_FILE`. Real environment variables override the file. See
@@ -73,7 +77,7 @@ The legion-web README has a full Caddy example.
 ## Layout
 
 ```
-cmd/legion-api   the binary: serve, migrate, create-user, import-legacy, version
+cmd/legion-api   the binary: serve, migrate, create-user, import-legacy, billing-run, version
 db/migrations    goose SQL migrations (embedded)
 db/queries       sqlc query files
 internal/auth    login, throttling, tokens, refresh rotation

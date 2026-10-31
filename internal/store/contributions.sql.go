@@ -150,21 +150,25 @@ func (q *Queries) GetContributionSchedule(ctx context.Context, contributionID in
 
 const listContributionFineRules = `-- name: ListContributionFineRules :many
 SELECT id, kind, fixed_amount, percentage_rate,
-       percentage_of, chargeable_on, mode, frequency, fine_limit, is_active
+       percentage_of, chargeable_on, mode, frequency, fine_limit, is_active,
+       sms_notifications, email_notifications, next_fine_date
 FROM contribution_fine_rules WHERE contribution_id = $1 ORDER BY id
 `
 
 type ListContributionFineRulesRow struct {
-	ID             int64
-	Kind           FineKind
-	FixedAmount    pgtype.Numeric
-	PercentageRate pgtype.Numeric
-	PercentageOf   *string
-	ChargeableOn   string
-	Mode           *string
-	Frequency      *string
-	FineLimit      *int32
-	IsActive       bool
+	ID                 int64
+	Kind               FineKind
+	FixedAmount        pgtype.Numeric
+	PercentageRate     pgtype.Numeric
+	PercentageOf       *string
+	ChargeableOn       string
+	Mode               *string
+	Frequency          *string
+	FineLimit          *int32
+	IsActive           bool
+	SmsNotifications   bool
+	EmailNotifications bool
+	NextFineDate       *time.Time
 }
 
 func (q *Queries) ListContributionFineRules(ctx context.Context, contributionID int64) ([]ListContributionFineRulesRow, error) {
@@ -187,6 +191,9 @@ func (q *Queries) ListContributionFineRules(ctx context.Context, contributionID 
 			&i.Frequency,
 			&i.FineLimit,
 			&i.IsActive,
+			&i.SmsNotifications,
+			&i.EmailNotifications,
+			&i.NextFineDate,
 		); err != nil {
 			return nil, err
 		}
@@ -335,10 +342,11 @@ func (q *Queries) UpdateContribution(ctx context.Context, arg UpdateContribution
 const upsertContributionSchedule = `-- name: UpsertContributionSchedule :exec
 INSERT INTO contribution_schedules (contribution_id, frequency, invoice_date, contribution_date,
                                     invoice_days_before, invoicing_active, sms_notifications,
-                                    email_notifications, fines_enabled)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                                    email_notifications, fines_enabled, rule)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, coalesce($10::jsonb, '{}'::jsonb))
 ON CONFLICT (contribution_id) DO UPDATE SET
     frequency = EXCLUDED.frequency,
+    rule = coalesce($10::jsonb, contribution_schedules.rule),
     invoice_date = EXCLUDED.invoice_date,
     contribution_date = EXCLUDED.contribution_date,
     invoice_days_before = EXCLUDED.invoice_days_before,
@@ -359,6 +367,7 @@ type UpsertContributionScheduleParams struct {
 	SmsNotifications   bool
 	EmailNotifications bool
 	FinesEnabled       bool
+	Rule               []byte
 }
 
 func (q *Queries) UpsertContributionSchedule(ctx context.Context, arg UpsertContributionScheduleParams) error {
@@ -372,6 +381,7 @@ func (q *Queries) UpsertContributionSchedule(ctx context.Context, arg UpsertCont
 		arg.SmsNotifications,
 		arg.EmailNotifications,
 		arg.FinesEnabled,
+		arg.Rule,
 	)
 	return err
 }

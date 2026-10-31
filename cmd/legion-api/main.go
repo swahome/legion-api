@@ -6,11 +6,14 @@
 //	legion-api migrate         apply pending database migrations
 //	legion-api create-user     create a user, e.g. a first admin
 //	legion-api import-legacy   load the LegionCore MySQL dump
+//	legion-api billing-run     raise the invoices and fines due today (or -date)
 //	legion-api version
 package main
 
 import (
+	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -20,10 +23,12 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	_ "time/tzdata" // the binary carries its own time zone database
 
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/swahome/legion-api/internal/auth"
+	"github.com/swahome/legion-api/internal/billing"
 	"github.com/swahome/legion-api/internal/config"
 	"github.com/swahome/legion-api/internal/database"
 	"github.com/swahome/legion-api/internal/httpapi"
@@ -54,8 +59,10 @@ func main() {
 		err = createUser(args)
 	case "import-legacy":
 		err = importLegacy(args)
+	case "billing-run":
+		err = billingRun(args)
 	default:
-		err = fmt.Errorf("unknown command %q (want serve, migrate, create-user, import-legacy or version)", cmd)
+		err = fmt.Errorf("unknown command %q (want serve, migrate, create-user, import-legacy, billing-run or version)", cmd)
 	}
 	if err != nil {
 		slog.Error("fatal", "cmd", cmd, "err", err)
@@ -86,7 +93,16 @@ func serve() error {
 	}
 
 	authSvc := auth.NewService(pool, auth.NewTokenIssuer(cfg.JWTSecret, cfg.AccessTTL), cfg.RefreshTTL, cfg.DefaultCallingCode)
-	api := httpapi.New(pool, authSvc, cfg.CookieSecure)
+	engine := billing.New(pool, slog.Default())
+	api := httpapi.New(pool, authSvc, cfg.CookieSecure).WithBilling(engine, cfg.Location)
+	if cfg.BillingAt != "off" {
+		at, err := billing.ParseClock(cfg.BillingAt)
+		if err != nil {
+			return fmt.Errorf("LEGION_BILLING_AT: %w", err)
+		}
+		go engine.Schedule(ctx, at, cfg.Location)
+		slog.Info("billing scheduled", "at", cfg.BillingAt, "timezone", cfg.Location.String())
+	}
 	if cfg.MobileServerKey != "" {
 		keys, err := mobile.LoadKeys(cfg.MobileServerKey, cfg.MobileAppCert)
 		if err != nil {
@@ -271,4 +287,42 @@ func importLegacy(args []string) error {
 		return fmt.Errorf("%d contribution balances differ from the legacy calculation", mismatches)
 	}
 	return nil
+}
+
+// billingRun raises the contribution invoices and fines due on a day, the
+// same work the nightly scheduler does. Re-running a day adds nothing.
+//
+//	legion-api billing-run [-date 2026-10-31]
+func billingRun(args []string) error {
+	fs := flag.NewFlagSet("billing-run", flag.ContinueOnError)
+	date := fs.String("date", "", "the day to bill (YYYY-MM-DD); default today in LEGION_TIMEZONE")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := config.LoadEnvFile(); err != nil {
+		return err
+	}
+	loc, err := time.LoadLocation(cmp.Or(os.Getenv("LEGION_TIMEZONE"), "Africa/Nairobi"))
+	if err != nil {
+		return err
+	}
+	today := billing.LocalToday(time.Now(), loc)
+	if *date != "" {
+		if today, err = time.Parse(time.DateOnly, *date); err != nil {
+			return fmt.Errorf("-date: %w", err)
+		}
+	}
+	ctx := context.Background()
+	pool, err := database.Open(ctx, os.Getenv("DATABASE_URL"))
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	if err := database.Migrate(ctx, pool); err != nil {
+		return err
+	}
+	sum, err := billing.New(pool, slog.Default()).Run(ctx, billing.RunOptions{Today: today, Trigger: "cli"})
+	out, _ := json.MarshalIndent(sum, "", "  ")
+	fmt.Println(string(out))
+	return err
 }
