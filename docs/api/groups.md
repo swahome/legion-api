@@ -63,6 +63,9 @@ someone takes effect immediately, without waiting for their token to expire.
 | POST, PATCH | `/income-categories[/{id}]`, `/expense-categories[/{id}]`, `/fine-categories[/{id}]` | official | `name`, `description`, `is_hidden`, `is_active`; fine categories also take `amount` |
 | GET, POST, PATCH | `/depositors[/{id}]` | official | Outside payers for income: `name`, `email`, `phone`, `description`, `is_active` |
 
+`GET /v1/groups/{id}` also says whether the caller `is_signatory` and how many
+requests are `withdrawal_requests_awaiting_me`.
+
 **Signatories** are active members who hold a group role, as in the legacy
 e-wallet; when the group's legacy `restrict_wallet_approval_to_group_admins` flag is
 set, only officials among them. Every signatory must approve; one decline declines

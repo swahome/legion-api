@@ -254,3 +254,8 @@ FROM withdrawal_approvals WHERE withdrawal_request_id = $1;
 -- name: IsSignatory :one
 SELECT EXISTS (SELECT 1 FROM memberships
                WHERE group_id = $1 AND id = $2 AND status = 'active' AND group_role_id IS NOT NULL);
+
+-- name: CountAwaitingApprovals :one
+SELECT count(*) FROM withdrawal_approvals x
+JOIN withdrawal_requests r ON r.id = x.withdrawal_request_id
+WHERE x.membership_id = $1 AND x.decision = 'pending' AND r.status = 'pending';

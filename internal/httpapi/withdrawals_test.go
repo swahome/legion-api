@@ -159,6 +159,10 @@ func TestWithdrawalRequests(t *testing.T) {
 	}
 	path := fmt.Sprintf("/withdrawal-requests/%d", req)
 
+	r = f.get(f.memberTok, "/")
+	if r.body["is_signatory"] != true || r.body["withdrawal_requests_awaiting_me"] != float64(1) {
+		t.Errorf("group for signatory: %s", r.raw)
+	}
 	r = f.get(f.memberTok, "/withdrawal-requests?awaiting=me")
 	expect(t, r, 200)
 	if r.body["requests"].(map[string]any)["total"] != float64(1) {

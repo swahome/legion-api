@@ -92,6 +92,19 @@ func (q *Queries) ContributionPaidByMember(ctx context.Context, arg Contribution
 	return paid, err
 }
 
+const countAwaitingApprovals = `-- name: CountAwaitingApprovals :one
+SELECT count(*) FROM withdrawal_approvals x
+JOIN withdrawal_requests r ON r.id = x.withdrawal_request_id
+WHERE x.membership_id = $1 AND x.decision = 'pending' AND r.status = 'pending'
+`
+
+func (q *Queries) CountAwaitingApprovals(ctx context.Context, membershipID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countAwaitingApprovals, membershipID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countPendingWithdrawalRequests = `-- name: CountPendingWithdrawalRequests :one
 SELECT count(*) FROM withdrawal_requests WHERE group_id = $1 AND status = 'pending'
 `

@@ -26,7 +26,11 @@ type groupResponse struct {
 	MyMembership  *int64  `json:"my_membership_id"`
 	IsOfficial    bool    `json:"is_official"`
 	PlatformAdmin bool    `json:"platform_admin"`
-	Summary       struct {
+	// IsSignatory: the caller answers withdrawal requests; AwaitingMe
+	// counts the ones waiting on them.
+	IsSignatory bool  `json:"is_signatory"`
+	AwaitingMe  int64 `json:"withdrawal_requests_awaiting_me"`
+	Summary     struct {
 		ActiveMembers          int64  `json:"active_members"`
 		Officials              int64  `json:"officials"`
 		ActiveContributions    int64  `json:"active_contributions"`
@@ -48,6 +52,16 @@ func (s *Server) getGroup(w http.ResponseWriter, r *http.Request) {
 	}
 	if a.IsOfficial {
 		resp.Email, resp.Phone, resp.Address = g.Email, g.Phone, g.Address
+	}
+	if a.MembershipID != nil {
+		if resp.IsSignatory, err = s.q.IsSignatory(r.Context(), store.IsSignatoryParams{GroupID: g.ID, ID: *a.MembershipID}); err != nil {
+			writeInternal(w, r, err)
+			return
+		}
+		if resp.AwaitingMe, err = s.q.CountAwaitingApprovals(r.Context(), *a.MembershipID); err != nil {
+			writeInternal(w, r, err)
+			return
+		}
 	}
 	resp.Summary.ActiveMembers = sum.ActiveMembers
 	resp.Summary.Officials = sum.Officials
