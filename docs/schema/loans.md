@@ -1,6 +1,6 @@
 # Loans
 
-Milestone 4, part 1. Migration `00010_loans.sql`, schedule maths in
+Milestone 4. Migration `00010_loans.sql`, schedule maths in
 `internal/loans`, writes in `internal/books/loans.go`, the view in
 `internal/books/loan_view.go`, import in `internal/legacy/loans.go`.
 
@@ -65,3 +65,29 @@ ids. A repayment keeps its deposit link only when the deposit was imported into
 the same group. `import-legacy` reconciles each live loan's balance (charges
 less repayments) against the legacy invoices less repayments and reports any
 difference; on the current dump there are none.
+
+## Fines (nightly job)
+
+The billing job (`docs/schema/billing.md`) also raises loan fines, after the
+contribution invoices and fines, one loan per transaction
+(`books.ChargeLoanFines`):
+
+- **Late-payment fine** (`loans.late_fine`): on each installment's
+  `next_fine_on` (the day after it falls due), if the installment is still not
+  fully paid with the repayments made by that date, a `late_fine` charge with
+  `parent_id` set to the installment. A percentage is of what is left of the
+  installment, the loan amount, the loan's unpaid balance (invoiced less paid
+  by that date) or the installment's interest. `next_fine_on` then moves on by
+  the rule's frequency; a one-off rule, a paid installment or `no_fines` stops
+  it. A `loan` scope rule charges one fine per loan per date (no `parent_id`).
+- **Outstanding-balance fine** (`loans.balance_fine`): from the day after the
+  last installment (`next_balance_fine_on`), a `balance_fine` charge while the
+  loan still has a balance, of a fixed amount or a percentage of the loan
+  amount or the unpaid balance.
+
+Voided and bad-debt loans are not fined. Fine dates older than the 7-day
+catch-up window are skipped forward without charging, so old legacy arrears
+are not back-billed. Fines carry `generated_by = 'fines'`; the unique index on
+loan, kind, date and installment makes a repeat run add nothing, and a fine an
+official waived stays waived. The run summary counts `loans_fined` and
+`loan_fines_raised`.

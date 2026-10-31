@@ -209,3 +209,20 @@ FROM loans l
 LEFT JOIN LATERAL (SELECT sum(amount) AS payable FROM loan_charges WHERE loan_id = l.id AND voided_at IS NULL) c ON true
 LEFT JOIN LATERAL (SELECT sum(amount) AS paid FROM loan_repayments WHERE loan_id = l.id AND voided_at IS NULL) r ON true
 WHERE l.group_id = $1;
+
+-- name: DueLoanFines :many
+-- Live loans with a late or outstanding-balance fine due on or before today.
+SELECT l.group_id, l.id FROM loans l
+WHERE l.voided_at IS NULL AND NOT l.is_bad_debt AND (
+    (l.balance_fine IS NOT NULL AND l.next_balance_fine_on <= sqlc.arg(today)::date)
+    OR (l.late_fine IS NOT NULL AND EXISTS (
+        SELECT 1 FROM loan_charges c
+        WHERE c.loan_id = l.id AND c.kind = 'installment' AND c.voided_at IS NULL AND NOT c.no_fines
+          AND c.next_fine_on <= sqlc.arg(today)::date)))
+ORDER BY l.group_id, l.id;
+
+-- name: SetChargeNextFine :exec
+UPDATE loan_charges SET next_fine_on = $2 WHERE id = $1;
+
+-- name: SetLoanNextBalanceFine :exec
+UPDATE loans SET next_balance_fine_on = $2 WHERE id = $1;

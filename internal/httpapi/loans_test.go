@@ -189,3 +189,67 @@ func pagedItems(r *httpResult, key string) []map[string]any {
 	}
 	return out
 }
+
+func TestLoanFines(t *testing.T) {
+	f := newMoneyFixture(t)
+	bank := f.account(map[string]any{"kind": "bank", "name": "Equity", "institution_id": f.bank, "initial_balance": "100000"})
+	// 12000 over 2 months at 10% a month flat: 7200 due on 10 Feb and 10 Mar 2025.
+	r := f.post("/loans", map[string]any{"member_id": f.member, "account_id": bank, "amount": "12000",
+		"disbursed_on": "2025-01-10", "installments": 2, "interest_type": "fixed_balance", "interest_rate": 10, "rate_per": "month",
+		"late_fine":    map[string]any{"kind": "fixed", "amount": "100", "frequency": "daily"},
+		"balance_fine": map[string]any{"kind": "fixed", "amount": "500", "frequency": "monthly"}})
+	expect(t, r, 201)
+	loanID := int64(r.body["id"].(float64))
+	path := fmt.Sprintf("/loans/%d", loanID)
+	fines := func() (n int, total float64) {
+		for _, c := range f.get(f.officialTok, path).list("charges") {
+			if c["kind"] != "installment" {
+				var a float64
+				fmt.Sscan(c["amount"].(string), &a)
+				n, total = n+1, total+a
+			}
+		}
+		return
+	}
+
+	// Fines start the day after the due date: 11, 12 and 13 February.
+	if s := f.bill("2025-02-13"); s.LoanFinesRaised != 3 || s.LoansFined != 1 {
+		t.Fatalf("first run: %+v", s)
+	}
+	if s := f.bill("2025-02-13"); s.LoanFinesRaised != 0 {
+		t.Errorf("repeat run raised %d", s.LoanFinesRaised)
+	}
+	if n, total := fines(); n != 3 || total != 300 {
+		t.Errorf("fines %d %v", n, total)
+	}
+	// Paying the installment and its fines stops the late fines on it.
+	expect(t, f.post(path+"/repayments", map[string]any{"account_id": bank, "amount": "7500", "paid_on": "2025-02-13"}), 201)
+	if s := f.bill("2025-02-14"); s.LoanFinesRaised != 0 {
+		t.Errorf("fined a paid installment: %+v", s)
+	}
+	// The second installment falls due on 10 March: late fines on 11 and 12
+	// March, and the outstanding-balance fine from 11 March, the day after the
+	// loan ends. A run more than a week late doesn't back-bill.
+	if s := f.bill("2025-03-12"); s.LoanFinesRaised != 3 {
+		t.Errorf("March run: %+v", s)
+	}
+	if n, total := fines(); n != 6 || total != 1000 {
+		t.Errorf("fines after March %d %v", n, total)
+	}
+	if s := f.bill("2025-06-30"); s.LoanFinesRaised != 8 {
+		// Only 23-30 June's daily late fines; the balance fines of 11 April,
+		// May and June are older than a week and are skipped.
+		t.Errorf("late run: %+v", s)
+	}
+	// A waived fine stays waived on a re-run.
+	var fineID int64
+	for _, c := range f.get(f.officialTok, path).list("charges") {
+		if c["kind"] == "late_fine" {
+			fineID = int64(c["id"].(float64))
+		}
+	}
+	expect(t, f.post(fmt.Sprintf("%s/fines/%d/void", path, fineID), nil), 200)
+	if s := f.bill("2025-06-30"); s.LoanFinesRaised != 0 {
+		t.Errorf("re-raised a waived fine: %+v", s)
+	}
+}

@@ -291,6 +291,43 @@ func (q *Queries) DeleteLoanType(ctx context.Context, arg DeleteLoanTypeParams) 
 	return result.RowsAffected(), nil
 }
 
+const dueLoanFines = `-- name: DueLoanFines :many
+SELECT l.group_id, l.id FROM loans l
+WHERE l.voided_at IS NULL AND NOT l.is_bad_debt AND (
+    (l.balance_fine IS NOT NULL AND l.next_balance_fine_on <= $1::date)
+    OR (l.late_fine IS NOT NULL AND EXISTS (
+        SELECT 1 FROM loan_charges c
+        WHERE c.loan_id = l.id AND c.kind = 'installment' AND c.voided_at IS NULL AND NOT c.no_fines
+          AND c.next_fine_on <= $1::date)))
+ORDER BY l.group_id, l.id
+`
+
+type DueLoanFinesRow struct {
+	GroupID int64
+	ID      int64
+}
+
+// Live loans with a late or outstanding-balance fine due on or before today.
+func (q *Queries) DueLoanFines(ctx context.Context, today time.Time) ([]DueLoanFinesRow, error) {
+	rows, err := q.db.Query(ctx, dueLoanFines, today)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DueLoanFinesRow{}
+	for rows.Next() {
+		var i DueLoanFinesRow
+		if err := rows.Scan(&i.GroupID, &i.ID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getLoanForUpdate = `-- name: GetLoanForUpdate :one
 SELECT id, group_id, membership_id, loan_type_id, amount, disbursed_on, account_id, interest_type, interest_rate, rate_per, reducing_method, fixed_interest, fixed_interest_rate, frequency, installments, grace_periods, first_due_on, ends_on, late_fine, balance_fine, processing_fee, fine_deferment, next_balance_fine_on, is_bad_debt, description, settings, is_backdated, created_by, created_at, updated_at, voided_at, voided_by FROM loans WHERE group_id = $1 AND id = $2 FOR UPDATE
 `
@@ -999,6 +1036,20 @@ func (q *Queries) MemberSavings(ctx context.Context, arg MemberSavingsParams) (s
 	return column_1, err
 }
 
+const setChargeNextFine = `-- name: SetChargeNextFine :exec
+UPDATE loan_charges SET next_fine_on = $2 WHERE id = $1
+`
+
+type SetChargeNextFineParams struct {
+	ID         int64
+	NextFineOn *time.Time
+}
+
+func (q *Queries) SetChargeNextFine(ctx context.Context, arg SetChargeNextFineParams) error {
+	_, err := q.db.Exec(ctx, setChargeNextFine, arg.ID, arg.NextFineOn)
+	return err
+}
+
 const setDepositLoan = `-- name: SetDepositLoan :exec
 UPDATE deposits SET loan_id = $2 WHERE id = $1
 `
@@ -1010,6 +1061,20 @@ type SetDepositLoanParams struct {
 
 func (q *Queries) SetDepositLoan(ctx context.Context, arg SetDepositLoanParams) error {
 	_, err := q.db.Exec(ctx, setDepositLoan, arg.ID, arg.LoanID)
+	return err
+}
+
+const setLoanNextBalanceFine = `-- name: SetLoanNextBalanceFine :exec
+UPDATE loans SET next_balance_fine_on = $2 WHERE id = $1
+`
+
+type SetLoanNextBalanceFineParams struct {
+	ID                int64
+	NextBalanceFineOn *time.Time
+}
+
+func (q *Queries) SetLoanNextBalanceFine(ctx context.Context, arg SetLoanNextBalanceFineParams) error {
+	_, err := q.db.Exec(ctx, setLoanNextBalanceFine, arg.ID, arg.NextBalanceFineOn)
 	return err
 }
 
