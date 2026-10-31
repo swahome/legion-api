@@ -295,3 +295,15 @@ func TestTransformMoney(t *testing.T) {
 		t.Errorf("approval 902 = %v", a)
 	}
 }
+
+func TestAccountIDPrefixRepeated(t *testing.T) {
+	tables := readFixture(t)
+	p, err := Transform(tables, tables["users_groups"], Options{}, fixedNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Withdrawal 600 is "bank-bank-1": the first bank account (new id 1).
+	if id := p.Withdrawals[0][4].(*int64); id == nil || *id != 1 {
+		t.Errorf("withdrawal 600 account = %v", p.Withdrawals[0][4])
+	}
+}
