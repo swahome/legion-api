@@ -100,6 +100,12 @@ used, as before.
 | `mobile/loan_applications/approve_loan_application` | A signatory answers: `action` 1 approves, 2 declines with `decline_message`. A `password` the app sends is checked |
 | `mobile/loan_applications/void_group_loan_application` | The applicant withdraws an open application (`id`), or an official declines it |
 | `mobile/loan_applications/upload_document`, `create_amt_loan_application`, `approve_ngo_loan_application` | Answer "This service is not available." These were for the Chamasoft NGO portal |
+| `mobile/bank_loans/get_group_bank_loan_options` | Bank loans still being repaid, with `balance` |
+| `mobile/deposits/record_bank_loan`, `void_bank_loan` | Officials only. `description`, `amount_loaned`, `total_loan_amount_payable`, `loan_balance` (what is still owed), `loan_start_date`, `loan_end_date`, `account_id`. Voiding (`bank_loan_id`) takes the deposit and repayments with it |
+| `mobile/withdrawals/record_bank_loan_repayment` | Officials only. `bank_loan_id`, `repayment_date`, `account_id`, `repayment_method`, `description`, `amount` |
+| `mobile/reports/bank_loans_summary` | One line per live bank loan and the footer totals. Arrears are the balances of loans past their end date |
+| `mobile/debtors/get_debtors_list` | Active debtors |
+| `mobile/debtor_loan_types/*` | The `loan_types` actions, on the loan types offered to debtors |
 
 **Recording.** Every action that changes the books is for officials only (a group role or admin), with the legacy "For group admins only" answer. The old category and depositor actions let any member make changes; now only officials can. Payments go through the same code as the web, so a recorded deposit, its cash book entry and the member's ledger entry are written and voided together. Dates may be a unix time (seconds or milliseconds) or a date string read as PHP's `strtotime` read it (`05-10-2026` is 5 October, `10/05/2026` is 5 October too, month first). Amounts may carry commas. The app's payment method numbers map to Legion's methods; unknown numbers record no method. Validation failures answer "Form validation failed" with `validation_errors` on the field concerned. SMS and email receipts start with milestone 5.
 
@@ -114,11 +120,11 @@ Group actions check the user (status 4), the group (status 5) and the caller's m
 
 **Totals.** Contributions paid are payments and transfers in, less refunds, transfers out (including to fines) and transfers to loans, plus loan repayments moved into a contribution. Fines paid include contributions and loan repayments moved to fines. Arrears are the contribution and fine balances, or 0 when the group disables arrears.
 
-**Loans.** The rules are the web's: a balance is the live installments and fines less the live repayments, and an application goes from its guarantors to the signatories (members with a group role, or only officials when the group restricts approvals to admins), then an official pays it out on the web. A loan paid out from the app is recorded with `loans/record_member_loan`. Amounts in loan rows come with two decimals (`4000.00`). `toggle_loan_application_status` was an internal helper in the old code and isn't served. Bank loans (money the group borrows) and debtor loans (loans to non-members) are not ported yet.
+**Loans.** The rules are the web's: a balance is the live installments and fines less the live repayments, and an application goes from its guarantors to the signatories (members with a group role, or only officials when the group restricts approvals to admins), then an official pays it out on the web. A loan paid out from the app is recorded with `loans/record_member_loan`. Amounts in loan rows come with two decimals (`4000.00`). `toggle_loan_application_status` was an internal helper in the old code and isn't served. Bank loans (money the group borrows) and debtors came in milestone 4b; the app had no actions for lending to debtors beyond the list and loan types.
 
 **Not there yet.** Until later milestones port notifications and bank alerts, these come back as 0 or empty in the shapes the app expects: notification and unreconciled counts. Deposits are all "Manually recorded" until bank reconciliation arrives. Groups that disable arrears got a deposits-only statement in the old app; for now they get the regular contribution statement.
 
-The other actions answer HTTP 404 until their milestone ports them. The old `*_categories/manage` actions, which read the request body directly and trusted the user id in it, are not carried over; the app uses `create`, `edit`, `hide`, `unhide` and `delete`. The same goes for `recipients/create`. `reports/bank_loans_summary` arrives with bank loans.
+The other actions answer HTTP 404 until their milestone ports them. The old `*_categories/manage` actions, which read the request body directly and trusted the user id in it, are not carried over; the app uses `create`, `edit`, `hide`, `unhide` and `delete`. The same goes for `recipients/create`.
 
 ## Deliberately not carried over
 

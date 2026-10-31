@@ -257,8 +257,8 @@ type loanTypeRow struct {
 	t  books.LoanType
 }
 
-func (s *Server) loanTypes(ctx context.Context, g *member, hidden bool) ([]loanTypeRow, error) {
-	rows, err := s.q.ListLoanTypes(ctx, store.ListLoanTypesParams{GroupID: g.group.ID, IncludeHidden: hidden})
+func (s *Server) loanTypes(ctx context.Context, c *call, g *member, hidden bool) ([]loanTypeRow, error) {
+	rows, err := s.q.ListLoanTypes(ctx, store.ListLoanTypesParams{GroupID: g.group.ID, IncludeHidden: hidden, ForDebtors: c.debtors})
 	if err != nil {
 		return nil, err
 	}
@@ -274,7 +274,7 @@ func (s *Server) loanTypes(ctx context.Context, g *member, hidden bool) ([]loanT
 }
 
 func (s *Server) loanTypesList(ctx context.Context, c *call, g *member) (any, error) {
-	all, err := s.loanTypes(ctx, g, true)
+	all, err := s.loanTypes(ctx, c, g, true)
 	if err != nil {
 		return nil, err
 	}
@@ -319,7 +319,7 @@ func fixedPeriodText(t books.LoanType) any {
 // loanTypeOptions is get_group_loan_type_options: the visible types with
 // every legacy setting, for the loan and application forms.
 func (s *Server) loanTypeOptions(ctx context.Context, c *call, g *member) (any, error) {
-	all, err := s.loanTypes(ctx, g, false)
+	all, err := s.loanTypes(ctx, c, g, false)
 	if err != nil {
 		return nil, err
 	}
@@ -341,7 +341,7 @@ func (s *Server) loanTypeOptions(ctx context.Context, c *call, g *member) (any, 
 }
 
 func (s *Server) loanTypeApplicationOptions(ctx context.Context, c *call, g *member) (any, error) {
-	all, err := s.loanTypes(ctx, g, false)
+	all, err := s.loanTypes(ctx, c, g, false)
 	if err != nil {
 		return nil, err
 	}
@@ -359,7 +359,7 @@ func (s *Server) oneLoanType(ctx context.Context, c *call, g *member) (int64, *b
 		return 0, nil, nil
 	}
 	r, err := s.q.GetLoanType(ctx, store.GetLoanTypeParams{GroupID: g.group.ID, ID: id})
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && r.ForDebtors != c.debtors) {
 		return 0, nil, nil
 	}
 	if err != nil {
@@ -523,7 +523,8 @@ func (s *Server) saveLoanTypeAs(ctx context.Context, g *member, id int64, t book
 }
 
 func (s *Server) createLoanType(ctx context.Context, c *call, g *member) (any, error) {
-	t := books.LoanType{Guarantors: "none", NeedsApproval: true, ReducingMethod: string(loans.EqualInstallments), FixedInterest: "0"}
+	t := books.LoanType{Guarantors: "none", NeedsApproval: true, ReducingMethod: string(loans.EqualInstallments), FixedInterest: "0",
+		ForDebtors: c.debtors}
 	errs := applyGeneral(c, &t)
 	// The app sends fines and general details in later calls; take them now
 	// when they come with the form.

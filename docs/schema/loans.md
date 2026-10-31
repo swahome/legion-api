@@ -110,3 +110,26 @@ official pays it out. Legacy statuses 2, 3, 4 and 8 map to
 Legacy's configurable approval levels (`loan_type_workflows`) were empty in
 the dump and are not carried over. The 35 legacy applications in the dump (one
 test group, 2020) are not imported; their loans are.
+
+## Bank loans and debtors (milestone 4b, migration 00012)
+
+**Bank loans** (legacy `bank_loans`) are money the group borrowed. Recording
+one writes a `bank_loan` deposit into the account; each repayment is a
+`bank_loan_repayment` withdrawal. Both carry `bank_loan_id`. Nothing is stored
+as a running balance: what is owed is `opening_balance` less the live
+repayments. `opening_balance` is the total payable for a new loan, or what was
+still owed when an older loan was first entered. The import takes legacy
+`loan_balance` (kept current by the old code) plus the imported live
+repayments as the opening balance. Legacy `bank_loan_repayments` rows are not
+copied: their withdrawals already are.
+
+**Debtors** (legacy `debtors`) are people outside the group who borrow from
+it. Their loans are rows in `loans` with `debtor_id` set and `membership_id`
+NULL (a check keeps exactly one), so the schedule, fines job, repayments and
+statements are the same code as member loans. Loan types have `for_debtors`
+(legacy `debtor_loan_types` were a copy of `loan_types`). Money for a debtor
+loan uses the external lending kinds: `external_loan_disbursement`,
+`external_lending_processing_income`, `external_lending_repayment`.
+
+The legacy dump has no bank loans or debtor loans and two debtors. The import
+brings in debtors and bank loans and reports any `debtor_loan*` rows it skips.
