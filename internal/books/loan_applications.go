@@ -94,7 +94,7 @@ func Apply(ctx context.Context, q *store.Queries, groupID, userID int64, a NewAp
 
 func applicationType(ctx context.Context, q *store.Queries, groupID, id int64) (LoanType, error) {
 	t, err := q.GetLoanType(ctx, store.GetLoanTypeParams{GroupID: groupID, ID: id})
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && t.ForDebtors) {
 		return LoanType{}, Error{"invalid_loan_type", "That loan type is not in this group."}
 	}
 	if err != nil {

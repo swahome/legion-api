@@ -42,6 +42,8 @@ var targets = []struct {
 	{"expense_categories", ExpenseCategoryCols, func(p *Plan) [][]any { return p.ExpenseCategories }},
 	{"fine_categories", FineCategoryCols, func(p *Plan) [][]any { return p.FineCategories }},
 	{"depositors", DepositorCols, func(p *Plan) [][]any { return p.Depositors }},
+	{"debtors", DebtorCols, func(p *Plan) [][]any { return p.Debtors }},
+	{"bank_loans", BankLoanCols, func(p *Plan) [][]any { return p.BankLoans }},
 	{"loan_types", LoanTypeCols, func(p *Plan) [][]any { return p.LoanTypes }},
 	{"loans", LoanCols, func(p *Plan) [][]any { return p.Loans }},
 	{"loan_charges", LoanChargeCols, func(p *Plan) [][]any { return p.LoanCharges }},
@@ -64,7 +66,7 @@ var identityTables = []string{"users", "groups", "group_roles", "memberships", "
 	"saccos", "sacco_branches", "mobile_money_providers", "group_accounts", "income_categories",
 	"expense_categories", "fine_categories", "depositors", "deposits", "withdrawals", "account_transfers",
 	"account_entries", "withdrawal_requests", "withdrawal_approvals",
-	"loan_types", "loans", "loan_charges", "loan_repayments", "loan_guarantors"}
+	"loan_types", "loans", "loan_charges", "loan_repayments", "loan_guarantors", "debtors", "bank_loans"}
 
 var enumTypes = []string{
 	"platform_role", "group_status", "membership_status", "contribution_kind",
@@ -83,6 +85,7 @@ var numericColumns = map[string][]string{
 	"account_entries": {"amount"}, "withdrawal_requests": {"amount"},
 	"loan_types":   {"interest_rate", "fixed_interest", "fixed_interest_rate", "min_amount", "max_amount", "savings_multiple"},
 	"loans":        {"amount", "interest_rate", "fixed_interest", "fixed_interest_rate"},
+	"bank_loans":   {"amount", "total_payable", "opening_balance"},
 	"loan_charges": {"principal", "interest", "amount"}, "loan_repayments": {"amount"}, "loan_guarantors": {"amount"},
 }
 
@@ -105,7 +108,7 @@ func Load(ctx context.Context, pool *pgxpool.Pool, p *Plan, replace bool) error 
 
 	return pgx.BeginFunc(ctx, conn.Conn(), func(tx pgx.Tx) error {
 		if replace {
-			_, err := tx.Exec(ctx, `TRUNCATE job_runs, loan_application_approvals, loan_application_guarantors, loan_applications, loan_guarantors, loan_repayments, loan_charges, loans, loan_types, withdrawal_approvals, withdrawal_requests, ledger_entries, account_entries, account_transfers, withdrawals,
+			_, err := tx.Exec(ctx, `TRUNCATE job_runs, loan_application_approvals, loan_application_guarantors, loan_applications, loan_guarantors, loan_repayments, loan_charges, loans, loan_types, debtors, bank_loans, withdrawal_approvals, withdrawal_requests, ledger_entries, account_entries, account_transfers, withdrawals,
 				deposits, depositors, fine_categories, expense_categories, income_categories, group_accounts,
 				mobile_money_providers, sacco_branches, saccos, contribution_fine_rules, contribution_members,
 				contribution_schedules, contributions, memberships, group_roles, groups,

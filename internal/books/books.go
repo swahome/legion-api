@@ -276,13 +276,22 @@ func RecordDeposit(ctx context.Context, q *store.Queries, groupID, userID int64,
 }
 
 // VoidDeposit voids a deposit with its cash book and ledger entries. It
-// returns ErrNotFound, or Error already_voided.
+// returns ErrNotFound, or Error already_voided. The money a bank loan
+// brought in is voided with the bank loan (VoidBankLoan), not alone.
 func VoidDeposit(ctx context.Context, q *store.Queries, groupID, id, userID int64) error {
-	if _, err := q.GetDeposit(ctx, store.GetDepositParams{GroupID: groupID, ID: id}); errors.Is(err, pgx.ErrNoRows) {
+	d, err := q.GetDeposit(ctx, store.GetDepositParams{GroupID: groupID, ID: id})
+	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	} else if err != nil {
 		return err
 	}
+	if d.BankLoanID != nil && d.Kind == store.DepositKindBankLoan && d.VoidedAt == nil {
+		return Error{"bank_loan_deposit", "This is a bank loan coming in: void the bank loan instead."}
+	}
+	return voidDeposit(ctx, q, groupID, id, userID)
+}
+
+func voidDeposit(ctx context.Context, q *store.Queries, groupID, id, userID int64) error {
 	n, err := q.VoidDeposit(ctx, store.VoidDepositParams{GroupID: groupID, ID: id, VoidedBy: &userID})
 	if err != nil {
 		return err
@@ -422,7 +431,8 @@ func VoidWithdrawal(ctx context.Context, q *store.Queries, groupID, id, userID i
 	} else if err != nil {
 		return err
 	}
-	if wd.LoanID != nil && wd.Kind == store.WithdrawalKindLoanDisbursement && wd.VoidedAt == nil {
+	if wd.LoanID != nil && wd.VoidedAt == nil &&
+		(wd.Kind == store.WithdrawalKindLoanDisbursement || wd.Kind == store.WithdrawalKindExternalLoanDisbursement) {
 		return Error{"loan_disbursement", "This is a loan being paid out: void the loan instead."}
 	}
 	return voidWithdrawal(ctx, q, groupID, id, userID)
