@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/swahome/legion-api/internal/billing"
+	"github.com/swahome/legion-api/internal/books"
 	"github.com/swahome/legion-api/internal/store"
 )
 
@@ -173,6 +174,13 @@ func (s *Server) groupDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 		out["recent"] = moves
 		out["pending_withdrawal_requests"] = pending
+		lt, err := s.q.LoanTotals(ctx, a.Group.ID)
+		if err != nil {
+			writeInternal(w, r, err)
+			return
+		}
+		out["loans"] = map[string]any{"count": lt.Loans, "lent": money(lt.Lent), "repaid": money(lt.Repaid),
+			"balance": centsText(books.Cents(lt.Payable) - books.Cents(lt.Repaid))}
 	}
 	writeJSON(w, http.StatusOK, out)
 }

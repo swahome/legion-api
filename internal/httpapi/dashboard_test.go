@@ -58,7 +58,7 @@ func TestDashboard(t *testing.T) {
 	if c := owed["fines"].(map[string]any); c["owed"] != "200.00" || c["members"] != float64(1) {
 		t.Errorf("owed fines: %v", c)
 	}
-	if r.body["members_behind"] != float64(1) || r.body["pending_withdrawal_requests"] != float64(0) {
+	if r.body["members_behind"] != float64(1) || r.body["pending_withdrawal_requests"] != float64(0) || r.body["loans"].(map[string]any)["balance"] != "0.00" {
 		t.Errorf("behind/pending: %s", r.raw)
 	}
 	recent := r.list("recent")

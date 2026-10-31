@@ -137,9 +137,8 @@ schedule rules and legacy codes.
   counts members who owe anything.
 - Officials also get `recent` (the latest 10 cash book movements: `date`,
   `direction` in or out, `kind`, `amount`, `account`, `member`) and
-  `pending_withdrawal_requests`.
-
-Loan figures (the legacy `total_loan_balances` and friends) join later in milestone 4.
+  `pending_withdrawal_requests`, and `loans`: the live loans' `count`, `lent`,
+  `repaid` and outstanding `balance`.
 
 ## Conventions
 
