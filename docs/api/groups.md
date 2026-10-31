@@ -82,6 +82,27 @@ Reference lists for opening accounts: `/v1/reference/banks` (and branches),
 `/v1/reference/mobile-money-providers`. See `docs/schema/money.md` for the tables
 and the legacy type codes.
 
+### Loans (milestone 4)
+
+| Method | Path | Who | Notes |
+|---|---|---|---|
+| GET | `/loan-types?include_hidden=` | member | Loan types; hidden ones only for officials who ask |
+| POST, PATCH | `/loan-types[/{id}]` | official | `name`, `interest_type` (`fixed_balance`, `reducing_balance`, `fixed_amount`), `interest_rate`, `rate_per` (`day`, `week`, `month`, `year`, `term`), `reducing_method`, `fixed_interest` or `fixed_interest_rate`, `frequency` (`daily`, `weekly`, `monthly`), `fixed_term` or `min_term`/`max_term`, `grace_periods`, `amount_basis` (`range` with `min_amount`/`max_amount`, or `savings` with `savings_multiple`), `guarantors` (`none`, `always`, `over_max`) with `min_guarantors`/`max_guarantors`, `late_fine`, `balance_fine`, `processing_fee`, `fine_deferment`, `needs_approval`, `is_hidden`. PATCH replaces the whole type |
+| DELETE | `/loan-types/{id}` | official | Existing loans keep their copied terms |
+| GET | `/loans?status=&member_id=&loan_type_id=&page=&page_size=` | member (own) or official | Paged, with totals. `status` is empty (live), `open`, `paid` or `voided` |
+| GET | `/loans/{id}` | member (own) or official | The loan, `totals` (`payable`, `principal`, `interest`, `fines`, `paid`, `balance`, `overdue`, `overpaid`), `charges` with what is paid on each, `repayments`, `guarantors`, `statement` with a running balance, `next_due` and `status` |
+| POST | `/loans/preview` | member | `loan_type_id` or full terms, `amount`, `installments`: the schedule (as `installments`), `interest`, `total`, `processing_fee` and `ends_on`, without saving |
+| POST | `/loans` | official | Records a loan already paid out: `member_id`, `account_id`, `amount`, `disbursed_on`, `installments`, optional `method`, `first_due_on`, `description`, `guarantors` (`member_id`, `amount`, `comment`), `skip_processing_fee`. With `loan_type_id` the type's terms and limits apply; without one every term is given. Writes the disbursement withdrawal, the schedule and the fee deposit |
+| PATCH | `/loans/{id}` | official | `description`, `is_bad_debt` |
+| POST | `/loans/{id}/void` | official | Voids the loan with its disbursement, fee, charges and repayments. 409 `loan_voided` |
+| POST | `/loans/{id}/repayments` | official | `account_id`, `amount`, `paid_on`, optional `method`, `description`. Writes a `loan_repayment` deposit |
+| POST | `/loans/{id}/repayments/{rid}/void` | official | Also voids the deposit. Voiding the deposit voids the repayment too |
+| POST | `/loans/{id}/fines/{cid}/void` | official | Waives one fine |
+
+A loan's disbursement withdrawal can't be voided on its own (409
+`loan_disbursement`); void the loan. See `docs/schema/loans.md` for the
+schedule rules and legacy codes.
+
 ### Dashboard
 
 `GET /dashboard` returns, as of today in the server's time zone (`as_of`):
@@ -102,7 +123,7 @@ and the legacy type codes.
   `direction` in or out, `kind`, `amount`, `account`, `member`) and
   `pending_withdrawal_requests`.
 
-Loan figures (the legacy `total_loan_balances` and friends) join in milestone 4.
+Loan figures (the legacy `total_loan_balances` and friends) join later in milestone 4.
 
 ## Conventions
 

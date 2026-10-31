@@ -42,7 +42,12 @@ var targets = []struct {
 	{"expense_categories", ExpenseCategoryCols, func(p *Plan) [][]any { return p.ExpenseCategories }},
 	{"fine_categories", FineCategoryCols, func(p *Plan) [][]any { return p.FineCategories }},
 	{"depositors", DepositorCols, func(p *Plan) [][]any { return p.Depositors }},
+	{"loan_types", LoanTypeCols, func(p *Plan) [][]any { return p.LoanTypes }},
+	{"loans", LoanCols, func(p *Plan) [][]any { return p.Loans }},
+	{"loan_charges", LoanChargeCols, func(p *Plan) [][]any { return p.LoanCharges }},
+	{"loan_guarantors", LoanGuarantorCols, func(p *Plan) [][]any { return p.LoanGuarantors }},
 	{"deposits", DepositCols, func(p *Plan) [][]any { return p.Deposits }},
+	{"loan_repayments", LoanRepaymentCols, func(p *Plan) [][]any { return p.LoanRepayments }},
 	{"withdrawals", WithdrawalCols, func(p *Plan) [][]any { return p.Withdrawals }},
 	{"account_transfers", AccountTransferCols, func(p *Plan) [][]any { return p.AccountTransfers }},
 	{"account_entries", AccountEntryCols, func(p *Plan) [][]any { return p.AccountEntries }},
@@ -58,13 +63,15 @@ var identityTables = []string{"users", "groups", "group_roles", "memberships", "
 	"contribution_fine_rules", "ledger_entries", "countries", "counties", "banks", "bank_branches",
 	"saccos", "sacco_branches", "mobile_money_providers", "group_accounts", "income_categories",
 	"expense_categories", "fine_categories", "depositors", "deposits", "withdrawals", "account_transfers",
-	"account_entries", "withdrawal_requests", "withdrawal_approvals"}
+	"account_entries", "withdrawal_requests", "withdrawal_approvals",
+	"loan_types", "loans", "loan_charges", "loan_repayments", "loan_guarantors"}
 
 var enumTypes = []string{
 	"platform_role", "group_status", "membership_status", "contribution_kind",
 	"contribution_category", "contribution_frequency", "fine_kind", "ledger_entry_type",
 	"account_kind", "deposit_kind", "withdrawal_kind", "payment_method",
 	"withdrawal_request_status", "approval_decision",
+	"interest_type", "interest_rate_per", "repayment_frequency", "loan_charge_kind",
 }
 
 // Columns that hold decimal strings to send as numeric.
@@ -74,6 +81,9 @@ var numericColumns = map[string][]string{
 	"group_accounts":          {"initial_balance"}, "fine_categories": {"amount"},
 	"deposits": {"amount"}, "withdrawals": {"amount"}, "account_transfers": {"amount"},
 	"account_entries": {"amount"}, "withdrawal_requests": {"amount"},
+	"loan_types":   {"interest_rate", "fixed_interest", "fixed_interest_rate", "min_amount", "max_amount", "savings_multiple"},
+	"loans":        {"amount", "interest_rate", "fixed_interest", "fixed_interest_rate"},
+	"loan_charges": {"principal", "interest", "amount"}, "loan_repayments": {"amount"}, "loan_guarantors": {"amount"},
 }
 
 var ErrNotEmpty = errors.New("target database already has data; pass -replace to wipe and reload it")
@@ -95,7 +105,7 @@ func Load(ctx context.Context, pool *pgxpool.Pool, p *Plan, replace bool) error 
 
 	return pgx.BeginFunc(ctx, conn.Conn(), func(tx pgx.Tx) error {
 		if replace {
-			_, err := tx.Exec(ctx, `TRUNCATE job_runs, withdrawal_approvals, withdrawal_requests, ledger_entries, account_entries, account_transfers, withdrawals,
+			_, err := tx.Exec(ctx, `TRUNCATE job_runs, loan_guarantors, loan_repayments, loan_charges, loans, loan_types, withdrawal_approvals, withdrawal_requests, ledger_entries, account_entries, account_transfers, withdrawals,
 				deposits, depositors, fine_categories, expense_categories, income_categories, group_accounts,
 				mobile_money_providers, sacco_branches, saccos, contribution_fine_rules, contribution_members,
 				contribution_schedules, contributions, memberships, group_roles, groups,
@@ -255,7 +265,10 @@ func Reconcile(ctx context.Context, pool *pgxpool.Pool, t Tables, w io.Writer) (
 		}
 	}
 	fmt.Fprintf(w, "legacy balance cache (informational): %d members compared, %d differ by 1 KES or more\n", cacheChecked, cacheDiff)
-	return mismatches, reconcileAccounts(ctx, pool, t, w)
+	if err := reconcileAccounts(ctx, pool, t, w); err != nil {
+		return mismatches, err
+	}
+	return mismatches, reconcileLoans(ctx, pool, t, w)
 }
 
 // reconcileAccounts compares each account's balance with the legacy
@@ -332,4 +345,53 @@ func (r Report) Write(w io.Writer) {
 	for _, k := range keys {
 		fmt.Fprintf(w, "  %7d  %s\n", r.Issues[k], k)
 	}
+}
+
+// reconcileLoans compares each imported loan's balance with the legacy one:
+// live loan_invoices less live loan_repayments (Loans_m::get_total_loan_balances).
+func reconcileLoans(ctx context.Context, pool *pgxpool.Pool, t Tables, w io.Writer) error {
+	legacy := map[int64]float64{}
+	for _, r := range t["loan_invoices"] {
+		if r.Flag("active") {
+			f, _ := strconv.ParseFloat(clean(r.Str("amount_payable")), 64)
+			legacy[r.Int("loan_id")] += f
+		}
+	}
+	for _, r := range t["loan_repayments"] {
+		if r.Flag("active") {
+			f, _ := strconv.ParseFloat(clean(r.Str("amount")), 64)
+			legacy[r.Int("loan_id")] -= f
+		}
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT l.id,
+		       coalesce((SELECT sum(amount) FROM loan_charges c WHERE c.loan_id = l.id AND c.voided_at IS NULL), 0)::float8
+		     - coalesce((SELECT sum(amount) FROM loan_repayments r WHERE r.loan_id = l.id AND r.voided_at IS NULL), 0)::float8
+		FROM loans l WHERE l.voided_at IS NULL`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	checked, differ := 0, 0
+	var owed float64
+	for rows.Next() {
+		var id int64
+		var ours float64
+		if err := rows.Scan(&id, &ours); err != nil {
+			return err
+		}
+		checked++
+		if math.Abs(ours-legacy[id]) >= 0.01 {
+			differ++
+		}
+		if ours > 0 {
+			owed += ours
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "loan balances: %d live loans compared with legacy invoices less repayments, %d differ; %.2f owed in all\n",
+		checked, differ, owed)
+	return nil
 }

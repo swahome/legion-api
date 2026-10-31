@@ -293,6 +293,10 @@ func VoidDeposit(ctx context.Context, q *store.Queries, groupID, id, userID int6
 	if err := q.VoidDepositEntries(ctx, &id); err != nil {
 		return err
 	}
+	// A loan repayment's deposit takes the repayment with it.
+	if err := q.VoidRepaymentByDeposit(ctx, store.VoidRepaymentByDepositParams{DepositID: &id, VoidedBy: &userID}); err != nil {
+		return err
+	}
 	return q.VoidDepositLedger(ctx, &id)
 }
 
@@ -410,12 +414,21 @@ func RecordWithdrawal(ctx context.Context, q *store.Queries, groupID, userID, ac
 }
 
 // VoidWithdrawal voids a withdrawal with its cash book and ledger entries.
+// A loan's disbursement is voided with the loan (VoidLoan), not alone.
 func VoidWithdrawal(ctx context.Context, q *store.Queries, groupID, id, userID int64) error {
-	if _, err := q.GetWithdrawal(ctx, store.GetWithdrawalParams{GroupID: groupID, ID: id}); errors.Is(err, pgx.ErrNoRows) {
+	wd, err := q.GetWithdrawal(ctx, store.GetWithdrawalParams{GroupID: groupID, ID: id})
+	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	} else if err != nil {
 		return err
 	}
+	if wd.LoanID != nil && wd.Kind == store.WithdrawalKindLoanDisbursement && wd.VoidedAt == nil {
+		return Error{"loan_disbursement", "This is a loan being paid out: void the loan instead."}
+	}
+	return voidWithdrawal(ctx, q, groupID, id, userID)
+}
+
+func voidWithdrawal(ctx context.Context, q *store.Queries, groupID, id, userID int64) error {
 	n, err := q.VoidWithdrawal(ctx, store.VoidWithdrawalParams{GroupID: groupID, ID: id, VoidedBy: &userID})
 	if err != nil {
 		return err

@@ -128,6 +128,10 @@ func (s *Server) Routes() http.Handler {
 				r.Get("/fines", s.listFines)
 				r.Get("/fine-balances", s.fineBalances)
 				r.Get("/dashboard", s.groupDashboard)
+				r.Get("/loan-types", s.listLoanTypes)
+				r.Get("/loans", s.listLoans)
+				r.Post("/loans/preview", s.previewLoan)
+				r.Get("/loans/{loanID}", s.getLoan)
 
 				r.Group(func(r chi.Router) {
 					r.Use(requireOfficial)
@@ -170,6 +174,16 @@ func (s *Server) Routes() http.Handler {
 					r.Post("/withdrawal-requests/{requestID}/pay", s.payWithdrawalRequest)
 					r.Post("/fines", s.fineMembers)
 					r.Post("/fines/{fineID}/void", s.voidFine)
+
+					r.Post("/loan-types", s.saveLoanType)
+					r.Patch("/loan-types/{loanTypeID}", s.saveLoanType)
+					r.Delete("/loan-types/{loanTypeID}", s.deleteLoanType)
+					r.Post("/loans", s.createLoan)
+					r.Patch("/loans/{loanID}", s.updateLoan)
+					r.Post("/loans/{loanID}/void", s.voidLoan)
+					r.Post("/loans/{loanID}/repayments", s.createRepayment)
+					r.Post("/loans/{loanID}/repayments/{repaymentID}/void", s.voidRepayment)
+					r.Post("/loans/{loanID}/fines/{chargeID}/void", s.voidLoanFine)
 				})
 			})
 		})
