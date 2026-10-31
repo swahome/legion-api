@@ -14,6 +14,70 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AccountKind string
+
+const (
+	AccountKindBank        AccountKind = "bank"
+	AccountKindSacco       AccountKind = "sacco"
+	AccountKindMobileMoney AccountKind = "mobile_money"
+	AccountKindPettyCash   AccountKind = "petty_cash"
+)
+
+func (e *AccountKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = AccountKind(s)
+	case string:
+		*e = AccountKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for AccountKind: %T", src)
+	}
+	return nil
+}
+
+type NullAccountKind struct {
+	AccountKind AccountKind
+	Valid       bool // Valid is true if AccountKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullAccountKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.AccountKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.AccountKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullAccountKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.AccountKind), nil
+}
+
+func (e AccountKind) Valid() bool {
+	switch e {
+	case AccountKindBank,
+		AccountKindSacco,
+		AccountKindMobileMoney,
+		AccountKindPettyCash:
+		return true
+	}
+	return false
+}
+
+func AllAccountKindValues() []AccountKind {
+	return []AccountKind{
+		AccountKindBank,
+		AccountKindSacco,
+		AccountKindMobileMoney,
+		AccountKindPettyCash,
+	}
+}
+
 type ContributionCategory string
 
 const (
@@ -221,6 +285,97 @@ func AllContributionKindValues() []ContributionKind {
 		ContributionKindRegular,
 		ContributionKindOneTime,
 		ContributionKindNonScheduled,
+	}
+}
+
+type DepositKind string
+
+const (
+	DepositKindContribution                    DepositKind = "contribution"
+	DepositKindFine                            DepositKind = "fine"
+	DepositKindMisc                            DepositKind = "misc"
+	DepositKindIncome                          DepositKind = "income"
+	DepositKindLoanRepayment                   DepositKind = "loan_repayment"
+	DepositKindBankLoan                        DepositKind = "bank_loan"
+	DepositKindStockSale                       DepositKind = "stock_sale"
+	DepositKindMoneyMarket                     DepositKind = "money_market"
+	DepositKindAssetSale                       DepositKind = "asset_sale"
+	DepositKindFundsTransfer                   DepositKind = "funds_transfer"
+	DepositKindLoanProcessingIncome            DepositKind = "loan_processing_income"
+	DepositKindExternalLendingProcessingIncome DepositKind = "external_lending_processing_income"
+	DepositKindExternalLendingRepayment        DepositKind = "external_lending_repayment"
+)
+
+func (e *DepositKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = DepositKind(s)
+	case string:
+		*e = DepositKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for DepositKind: %T", src)
+	}
+	return nil
+}
+
+type NullDepositKind struct {
+	DepositKind DepositKind
+	Valid       bool // Valid is true if DepositKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullDepositKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.DepositKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.DepositKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullDepositKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.DepositKind), nil
+}
+
+func (e DepositKind) Valid() bool {
+	switch e {
+	case DepositKindContribution,
+		DepositKindFine,
+		DepositKindMisc,
+		DepositKindIncome,
+		DepositKindLoanRepayment,
+		DepositKindBankLoan,
+		DepositKindStockSale,
+		DepositKindMoneyMarket,
+		DepositKindAssetSale,
+		DepositKindFundsTransfer,
+		DepositKindLoanProcessingIncome,
+		DepositKindExternalLendingProcessingIncome,
+		DepositKindExternalLendingRepayment:
+		return true
+	}
+	return false
+}
+
+func AllDepositKindValues() []DepositKind {
+	return []DepositKind{
+		DepositKindContribution,
+		DepositKindFine,
+		DepositKindMisc,
+		DepositKindIncome,
+		DepositKindLoanRepayment,
+		DepositKindBankLoan,
+		DepositKindStockSale,
+		DepositKindMoneyMarket,
+		DepositKindAssetSale,
+		DepositKindFundsTransfer,
+		DepositKindLoanProcessingIncome,
+		DepositKindExternalLendingProcessingIncome,
+		DepositKindExternalLendingRepayment,
 	}
 }
 
@@ -501,6 +656,76 @@ func AllMembershipStatusValues() []MembershipStatus {
 	}
 }
 
+type PaymentMethod string
+
+const (
+	PaymentMethodMpesa         PaymentMethod = "mpesa"
+	PaymentMethodCash          PaymentMethod = "cash"
+	PaymentMethodCheque        PaymentMethod = "cheque"
+	PaymentMethodFundsTransfer PaymentMethod = "funds_transfer"
+	PaymentMethodEquitel       PaymentMethod = "equitel"
+	PaymentMethodStandingOrder PaymentMethod = "standing_order"
+)
+
+func (e *PaymentMethod) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = PaymentMethod(s)
+	case string:
+		*e = PaymentMethod(s)
+	default:
+		return fmt.Errorf("unsupported scan type for PaymentMethod: %T", src)
+	}
+	return nil
+}
+
+type NullPaymentMethod struct {
+	PaymentMethod PaymentMethod
+	Valid         bool // Valid is true if PaymentMethod is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullPaymentMethod) Scan(value interface{}) error {
+	if value == nil {
+		ns.PaymentMethod, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.PaymentMethod.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullPaymentMethod) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.PaymentMethod), nil
+}
+
+func (e PaymentMethod) Valid() bool {
+	switch e {
+	case PaymentMethodMpesa,
+		PaymentMethodCash,
+		PaymentMethodCheque,
+		PaymentMethodFundsTransfer,
+		PaymentMethodEquitel,
+		PaymentMethodStandingOrder:
+		return true
+	}
+	return false
+}
+
+func AllPaymentMethodValues() []PaymentMethod {
+	return []PaymentMethod{
+		PaymentMethodMpesa,
+		PaymentMethodCash,
+		PaymentMethodCheque,
+		PaymentMethodFundsTransfer,
+		PaymentMethodEquitel,
+		PaymentMethodStandingOrder,
+	}
+}
+
 type PlatformRole string
 
 const (
@@ -578,6 +803,122 @@ func AllPlatformRoleValues() []PlatformRole {
 		PlatformRoleParishAdmin,
 		PlatformRoleSubParishAdmin,
 	}
+}
+
+type WithdrawalKind string
+
+const (
+	WithdrawalKindExpense                  WithdrawalKind = "expense"
+	WithdrawalKindAssetPurchase            WithdrawalKind = "asset_purchase"
+	WithdrawalKindLoanDisbursement         WithdrawalKind = "loan_disbursement"
+	WithdrawalKindStockPurchase            WithdrawalKind = "stock_purchase"
+	WithdrawalKindMoneyMarketInvestment    WithdrawalKind = "money_market_investment"
+	WithdrawalKindContributionRefund       WithdrawalKind = "contribution_refund"
+	WithdrawalKindBankLoanRepayment        WithdrawalKind = "bank_loan_repayment"
+	WithdrawalKindFundsTransfer            WithdrawalKind = "funds_transfer"
+	WithdrawalKindExternalLoanDisbursement WithdrawalKind = "external_loan_disbursement"
+	WithdrawalKindDividend                 WithdrawalKind = "dividend"
+)
+
+func (e *WithdrawalKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = WithdrawalKind(s)
+	case string:
+		*e = WithdrawalKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for WithdrawalKind: %T", src)
+	}
+	return nil
+}
+
+type NullWithdrawalKind struct {
+	WithdrawalKind WithdrawalKind
+	Valid          bool // Valid is true if WithdrawalKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullWithdrawalKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.WithdrawalKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.WithdrawalKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullWithdrawalKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.WithdrawalKind), nil
+}
+
+func (e WithdrawalKind) Valid() bool {
+	switch e {
+	case WithdrawalKindExpense,
+		WithdrawalKindAssetPurchase,
+		WithdrawalKindLoanDisbursement,
+		WithdrawalKindStockPurchase,
+		WithdrawalKindMoneyMarketInvestment,
+		WithdrawalKindContributionRefund,
+		WithdrawalKindBankLoanRepayment,
+		WithdrawalKindFundsTransfer,
+		WithdrawalKindExternalLoanDisbursement,
+		WithdrawalKindDividend:
+		return true
+	}
+	return false
+}
+
+func AllWithdrawalKindValues() []WithdrawalKind {
+	return []WithdrawalKind{
+		WithdrawalKindExpense,
+		WithdrawalKindAssetPurchase,
+		WithdrawalKindLoanDisbursement,
+		WithdrawalKindStockPurchase,
+		WithdrawalKindMoneyMarketInvestment,
+		WithdrawalKindContributionRefund,
+		WithdrawalKindBankLoanRepayment,
+		WithdrawalKindFundsTransfer,
+		WithdrawalKindExternalLoanDisbursement,
+		WithdrawalKindDividend,
+	}
+}
+
+type AccountEntry struct {
+	ID                int64
+	LegacyID          *int32
+	LegacyType        *int16
+	GroupID           int64
+	AccountID         *int64
+	AccountKind       AccountKind
+	Direction         int16
+	Amount            pgtype.Numeric
+	EntryDate         time.Time
+	Description       string
+	DepositID         *int64
+	WithdrawalID      *int64
+	AccountTransferID *int64
+	MembershipID      *int64
+	IsBackdated       bool
+	CreatedAt         time.Time
+	VoidedAt          *time.Time
+}
+
+type AccountTransfer struct {
+	ID            int64
+	LegacyID      *int32
+	GroupID       int64
+	FromAccountID *int64
+	ToAccountID   *int64
+	Amount        pgtype.Numeric
+	TransferDate  time.Time
+	Description   string
+	CreatedBy     *int64
+	CreatedAt     time.Time
+	VoidedAt      *time.Time
 }
 
 type AdminAuditLog struct {
@@ -706,6 +1047,72 @@ type County struct {
 	UpdatedAt time.Time
 }
 
+type Deposit struct {
+	ID               int64
+	LegacyID         *int32
+	LegacyType       *int16
+	GroupID          int64
+	AccountID        *int64
+	AccountKind      AccountKind
+	Kind             DepositKind
+	Method           NullPaymentMethod
+	MembershipID     *int64
+	ContributionID   *int64
+	FineCategoryID   *int64
+	IncomeCategoryID *int64
+	DepositorID      *int64
+	Amount           pgtype.Numeric
+	DepositDate      time.Time
+	Description      string
+	IsBackdated      bool
+	Refs             []byte
+	CreatedBy        *int64
+	CreatedAt        time.Time
+	VoidedAt         *time.Time
+	VoidedBy         *int64
+}
+
+type Depositor struct {
+	ID          int64
+	LegacyID    *int32
+	GroupID     int64
+	Name        string
+	Email       *string
+	Phone       *string
+	Description string
+	IsActive    bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+type ExpenseCategory struct {
+	ID               int64
+	LegacyID         *int32
+	GroupID          int64
+	Name             string
+	Description      string
+	IsAdministrative bool
+	IsHidden         bool
+	IsActive         bool
+	DeletedAt        *time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+type FineCategory struct {
+	ID          int64
+	LegacyID    *int32
+	GroupID     int64
+	Name        string
+	Description string
+	Amount      pgtype.Numeric
+	IsHidden    bool
+	IsActive    bool
+	DeletedAt   *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
 type Group struct {
 	ID          int64
 	LegacyID    *int32
@@ -724,6 +1131,28 @@ type Group struct {
 	UpdatedAt   time.Time
 }
 
+type GroupAccount struct {
+	ID             int64
+	LegacyID       *int32
+	GroupID        int64
+	Kind           AccountKind
+	Name           string
+	AccountNumber  string
+	BankID         *int64
+	BankBranchID   *int64
+	SaccoID        *int64
+	SaccoBranchID  *int64
+	ProviderID     *int64
+	InitialBalance pgtype.Numeric
+	IsDefault      bool
+	IsVerified     bool
+	IsClosed       bool
+	Settings       []byte
+	DeletedAt      *time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
 type GroupRole struct {
 	ID          int64
 	LegacyID    *int32
@@ -732,6 +1161,19 @@ type GroupRole struct {
 	Description string
 	IsEditable  bool
 	IsActive    bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+type IncomeCategory struct {
+	ID          int64
+	LegacyID    *int32
+	GroupID     int64
+	Name        string
+	Description string
+	IsHidden    bool
+	IsActive    bool
+	DeletedAt   *time.Time
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -745,13 +1187,15 @@ type LedgerEntry struct {
 	ContributionID *int64
 	EntryType      LedgerEntryType
 	// Always positive; see ledger_entry_rules for the effect on balances
-	Amount      pgtype.Numeric
-	EntryDate   time.Time
-	DueDate     *time.Time
-	Description string
-	VoidedAt    *time.Time
-	CreatedAt   time.Time
-	IsBackdated bool
+	Amount         pgtype.Numeric
+	EntryDate      time.Time
+	DueDate        *time.Time
+	Description    string
+	VoidedAt       *time.Time
+	CreatedAt      time.Time
+	IsBackdated    bool
+	DepositID      *int64
+	FineCategoryID *int64
 }
 
 type LedgerEntryRule struct {
@@ -793,6 +1237,16 @@ type MobileAccessToken struct {
 	LastUsedAt *time.Time
 }
 
+type MobileMoneyProvider struct {
+	ID        int64
+	LegacyID  *int32
+	Name      string
+	Slug      string
+	IsActive  bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 type MobilePin struct {
 	Identity   string
 	PinHash    []byte
@@ -822,6 +1276,26 @@ type RefreshToken struct {
 	IpAddress *netip.Addr
 }
 
+type Sacco struct {
+	ID        int64
+	LegacyID  *int32
+	Name      string
+	Slug      string
+	IsActive  bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+type SaccoBranch struct {
+	ID        int64
+	LegacyID  *int32
+	SaccoID   int64
+	Name      string
+	IsActive  bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 type User struct {
 	ID                    int64
 	LegacyID              *int32
@@ -845,4 +1319,27 @@ type UserPlatformRole struct {
 	UserID    int64
 	Role      PlatformRole
 	CreatedAt time.Time
+}
+
+type Withdrawal struct {
+	ID                int64
+	LegacyID          *int32
+	LegacyType        *int16
+	GroupID           int64
+	AccountID         *int64
+	AccountKind       AccountKind
+	Kind              WithdrawalKind
+	Method            NullPaymentMethod
+	MembershipID      *int64
+	ContributionID    *int64
+	ExpenseCategoryID *int64
+	Amount            pgtype.Numeric
+	WithdrawalDate    time.Time
+	Description       string
+	IsBackdated       bool
+	Refs              []byte
+	CreatedBy         *int64
+	CreatedAt         time.Time
+	VoidedAt          *time.Time
+	VoidedBy          *int64
 }

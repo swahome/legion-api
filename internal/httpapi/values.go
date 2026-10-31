@@ -145,3 +145,28 @@ func (o *Optional[T]) UnmarshalJSON(b []byte) error {
 	o.Value = &v
 	return nil
 }
+
+// cents parses a decimal money string ("-4200.5") into whole cents.
+// Amounts are numeric(14,2), so they fit an int64 with room to spare.
+func cents(s string) int64 {
+	s = money(s)
+	neg := strings.HasPrefix(s, "-")
+	whole, frac, _ := strings.Cut(strings.TrimPrefix(s, "-"), ".")
+	var n int64
+	for _, c := range whole + frac {
+		n = n*10 + int64(c-'0')
+	}
+	if neg {
+		return -n
+	}
+	return n
+}
+
+// formatCents renders cents as a two-decimal money string.
+func formatCents(n int64) string {
+	sign := ""
+	if n < 0 {
+		sign, n = "-", -n
+	}
+	return fmt.Sprintf("%s%d.%02d", sign, n/100, n%100)
+}

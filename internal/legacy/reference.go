@@ -141,7 +141,8 @@ func (p *Plan) banks(rows []Row, now time.Time) map[int64]bool {
 
 var BankBranchCols = []string{"id", "legacy_id", "bank_id", "name", "code", "is_active", "created_at", "updated_at"}
 
-func (p *Plan) bankBranches(rows []Row, banks map[int64]bool, now time.Time) {
+func (p *Plan) bankBranches(rows []Row, banks map[int64]bool, now time.Time) map[int64]bool {
+	ids := map[int64]bool{}
 	for _, r := range byID(rows) {
 		id := r.Int("id")
 		name := clean(r.Str("name"))
@@ -161,7 +162,9 @@ func (p *Plan) bankBranches(rows []Row, banks map[int64]bool, now time.Time) {
 		created := timeOr(epoch(r.Str("created_on")), now)
 		p.BankBranches = append(p.BankBranches, []any{id, id, r.Int("bank_id"), name, code,
 			r.Ptr("active") == nil || r.Flag("active"), created, timeOr(epoch(r.Str("modified_on")), created)})
+		ids[id] = true
 	}
+	return ids
 }
 
 var SettingCols = []string{"key", "value"}

@@ -20,6 +20,10 @@ var DumpTables = []string{
 	"member_contributions_fines_balances",
 	"countries", "counties", "banks", "bank_branches", "settings",
 	"user_pin_access_token",
+	"saccos", "sacco_branches", "mobile_money_providers",
+	"bank_accounts", "sacco_accounts", "mobile_money_accounts", "petty_cash_accounts",
+	"income_categories", "expense_categories", "fine_categories", "depositors",
+	"deposits", "withdrawals", "account_transfers", "transaction_statements",
 }
 
 // Options control how legacy values are mapped.
@@ -39,6 +43,9 @@ type Plan struct {
 	Contributions, Schedules, ContributionMembers, FineRules, Ledger [][]any
 	Countries, Counties, Banks, BankBranches, Settings               [][]any
 	MobileTokens                                                     [][]any
+	Saccos, SaccoBranches, Providers, Accounts                       [][]any
+	IncomeCategories, ExpenseCategories, FineCategories, Depositors  [][]any
+	Deposits, Withdrawals, AccountTransfers, AccountEntries          [][]any
 
 	Report Report
 }
@@ -155,11 +162,21 @@ func Transform(t Tables, roles []Row, opt Options, now time.Time) (*Plan, error)
 	p.schedules(t, contribs, now)
 	p.contributionMembers(t["contribution_member_pairings"], contribs, members, now)
 	p.fineRules(t["contribution_fine_settings"], contribs, now)
-	p.ledger(t["statements"], groups, members, contribs, now)
 	countries := p.countries(t["countries"], now)
 	p.counties(t["counties"], countries, now)
 	banks := p.banks(t["banks"], now)
-	p.bankBranches(t["bank_branches"], banks, now)
+	branches := p.bankBranches(t["bank_branches"], banks, now)
+
+	saccos, saccoBranches, providers := p.institutions(t, now)
+	ref := refSets{groups: groups, users: users, banks: banks, branches: branches, saccos: saccos,
+		saccoBranches: saccoBranches, providers: providers, members: members, contribs: contribs}
+	accounts := p.accounts(t, ref, now)
+	income, expense, fines, depositors := p.categories(t, groups, now)
+	deposits := p.deposits(t["deposits"], ref, accounts, income, fines, depositors, now)
+	withdrawals := p.withdrawals(t["withdrawals"], ref, accounts, expense, now)
+	transfers := p.accountTransfers(t["account_transfers"], ref, accounts, now)
+	p.accountEntries(t["transaction_statements"], ref, accounts, deposits, withdrawals, transfers, now)
+	p.ledger(t["statements"], groups, members, contribs, deposits, fines, now)
 	p.settings(t["settings"])
 	p.mobileTokens(t["user_pin_access_token"], users, now)
 
@@ -171,6 +188,11 @@ func Transform(t Tables, roles []Row, opt Options, now time.Time) (*Plan, error)
 		"countries": p.Countries, "counties": p.Counties, "banks": p.Banks,
 		"bank_branches": p.BankBranches, "platform_settings": p.Settings,
 		"mobile_access_tokens": p.MobileTokens,
+		"saccos":               p.Saccos, "sacco_branches": p.SaccoBranches, "mobile_money_providers": p.Providers,
+		"group_accounts": p.Accounts, "income_categories": p.IncomeCategories,
+		"expense_categories": p.ExpenseCategories, "fine_categories": p.FineCategories,
+		"depositors": p.Depositors, "deposits": p.Deposits, "withdrawals": p.Withdrawals,
+		"account_transfers": p.AccountTransfers, "account_entries": p.AccountEntries,
 	} {
 		p.Report.Imported[name] = len(rows)
 	}
@@ -662,7 +684,8 @@ func (p *Plan) fineRules(rows []Row, contribs map[int64]*contribution, now time.
 }
 
 var LedgerCols = []string{"id", "legacy_id", "legacy_type", "group_id", "membership_id", "contribution_id",
-	"entry_type", "amount", "entry_date", "due_date", "description", "voided_at", "created_at", "is_backdated"}
+	"entry_type", "amount", "entry_date", "due_date", "description", "voided_at", "created_at", "is_backdated",
+	"deposit_id", "fine_category_id"}
 
 // LedgerTypes maps statements.transaction_type to ledger_entry_type.
 // See Transactions::$statement_transaction_names in the legacy code.
@@ -677,7 +700,8 @@ var LedgerTypes = map[int64]string{
 	30: "contribution_to_loan_transfer", 31: "loan_to_fine_transfer",
 }
 
-func (p *Plan) ledger(rows []Row, groups map[int64]bool, members map[int64]int64, contribs map[int64]*contribution, now time.Time) {
+func (p *Plan) ledger(rows []Row, groups map[int64]bool, members map[int64]int64, contribs map[int64]*contribution,
+	deposits, fineCategories map[int64]int64, now time.Time) {
 	for _, r := range byID(rows) {
 		id, gid := r.Int("id"), r.Int("group_id")
 		typ := r.Int("transaction_type")
@@ -732,6 +756,8 @@ func (p *Plan) ledger(rows []Row, groups map[int64]bool, members map[int64]int64
 		p.Ledger = append(p.Ledger, []any{
 			id, id, typ, gid, member, contrib, entryType, amount, *date, due,
 			clean(r.Str("description")), voided, created, r.Flag("is_a_back_dating_record"),
+			inGroup(p, "ledger_entries", "deposit_id", r, gid, deposits),
+			inGroup(p, "ledger_entries", "fine_category_id", r, gid, fineCategories),
 		})
 	}
 }
