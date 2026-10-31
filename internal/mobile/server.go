@@ -70,6 +70,23 @@ func New(pool *pgxpool.Pool, keys *Keys, authSvc *auth.Service, otp OTPSender) *
 		"resend_pin":            {public: true, fn: s.resendPin},
 		"verify_pin":            {public: true, fn: s.verifyPin},
 		"get_user_checkin_data": {fn: s.getUserCheckinData},
+
+		"get_group_data":                                {fn: s.groupAction(0, s.getGroupData)},
+		"get_member_dashboard_data":                     {fn: s.groupAction(0, s.getMemberDashboardData)},
+		"get_group_dashboard_data":                      {fn: s.groupAction(0, s.getGroupDashboardData)},
+		"get_group_member_contribution_summary":         {fn: s.groupAction(0, s.getGroupMemberContributionSummary)},
+		"countries/get_country_options":                 {fn: s.userAction(s.getCountryOptions)},
+		"countries/get_currency_options":                {fn: s.userAction(s.getCurrencyOptions)},
+		"banks/get_bank_options":                        {fn: s.groupAction(6, s.getBankOptions)},
+		"bank_branches/get_bank_branches_options":       {fn: s.groupAction(6, s.getBankBranchOptions)},
+		"group_roles/group_roles_list":                  {fn: s.groupAction(6, s.groupRolesList)},
+		"members/get_members_and_details":               {fn: s.groupAction(6, s.getMembersAndDetails)},
+		"members/get_group_member_options":              {fn: s.groupAction(6, s.getGroupMemberOptions)},
+		"contributions/get_group_contributions":         {fn: s.groupAction(6, s.getGroupContributions)},
+		"contributions/get_group_contribution":          {fn: s.groupAction(6, s.getGroupContribution)},
+		"contributions/get_group_contribution_options":  {fn: s.groupAction(6, s.getGroupContributionOptions)},
+		"contributions/get_member_contribution_options": {fn: s.groupAction(6, s.getMemberContributionOptions)},
+		"statements/contribution_statement":             {fn: s.groupAction(0, s.contributionStatement)},
 	}
 	return s
 }

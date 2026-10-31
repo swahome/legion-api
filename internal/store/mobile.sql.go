@@ -10,6 +10,30 @@ import (
 	"time"
 )
 
+const activeMembershipIDs = `-- name: ActiveMembershipIDs :many
+SELECT id FROM memberships WHERE group_id = $1 AND status = 'active' ORDER BY id
+`
+
+func (q *Queries) ActiveMembershipIDs(ctx context.Context, groupID int64) ([]int64, error) {
+	rows, err := q.db.Query(ctx, activeMembershipIDs, groupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createMobileToken = `-- name: CreateMobileToken :exec
 INSERT INTO mobile_access_tokens (token_hash, user_id, expires_at) VALUES ($1, $2, $3)
 `
@@ -119,6 +143,543 @@ func (q *Queries) MarkMobilePinVerified(ctx context.Context, identity string) er
 	return err
 }
 
+const mobileBankBranches = `-- name: MobileBankBranches :many
+SELECT id, name FROM bank_branches WHERE bank_id = $1 AND is_active ORDER BY id
+`
+
+type MobileBankBranchesRow struct {
+	ID   int64
+	Name string
+}
+
+func (q *Queries) MobileBankBranches(ctx context.Context, bankID int64) ([]MobileBankBranchesRow, error) {
+	rows, err := q.db.Query(ctx, mobileBankBranches, bankID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MobileBankBranchesRow{}
+	for rows.Next() {
+		var i MobileBankBranchesRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const mobileBanks = `-- name: MobileBanks :many
+SELECT id, name, logo FROM banks
+WHERE is_active AND coalesce(settings->>'wallet', '0') IN ('', '0')
+ORDER BY name
+`
+
+type MobileBanksRow struct {
+	ID   int64
+	Name string
+	Logo string
+}
+
+// Banks for the app's pickers. The legacy list left out e-wallets.
+func (q *Queries) MobileBanks(ctx context.Context) ([]MobileBanksRow, error) {
+	rows, err := q.db.Query(ctx, mobileBanks)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MobileBanksRow{}
+	for rows.Next() {
+		var i MobileBanksRow
+		if err := rows.Scan(&i.ID, &i.Name, &i.Logo); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const mobileContributionBalances = `-- name: MobileContributionBalances :many
+SELECT e.contribution_id::bigint AS contribution_id, coalesce(sum(r.sign * e.amount), 0)::text AS balance
+FROM ledger_entries e
+JOIN ledger_entry_rules r ON r.entry_type = e.entry_type AND r.bucket = 'contribution'
+WHERE e.group_id = $1 AND e.membership_id = $2 AND e.voided_at IS NULL AND e.contribution_id IS NOT NULL
+GROUP BY e.contribution_id
+`
+
+type MobileContributionBalancesParams struct {
+	GroupID      int64
+	MembershipID *int64
+}
+
+type MobileContributionBalancesRow struct {
+	ContributionID int64
+	Balance        string
+}
+
+// One member's balance per contribution.
+func (q *Queries) MobileContributionBalances(ctx context.Context, arg MobileContributionBalancesParams) ([]MobileContributionBalancesRow, error) {
+	rows, err := q.db.Query(ctx, mobileContributionBalances, arg.GroupID, arg.MembershipID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MobileContributionBalancesRow{}
+	for rows.Next() {
+		var i MobileContributionBalancesRow
+		if err := rows.Scan(&i.ContributionID, &i.Balance); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const mobileContributionOptions = `-- name: MobileContributionOptions :many
+SELECT id, name FROM contributions
+WHERE group_id = $1 AND is_active AND NOT is_hidden AND deleted_at IS NULL
+ORDER BY name, id
+`
+
+type MobileContributionOptionsRow struct {
+	ID   int64
+	Name string
+}
+
+func (q *Queries) MobileContributionOptions(ctx context.Context, groupID int64) ([]MobileContributionOptionsRow, error) {
+	rows, err := q.db.Query(ctx, mobileContributionOptions, groupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MobileContributionOptionsRow{}
+	for rows.Next() {
+		var i MobileContributionOptionsRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const mobileCountries = `-- name: MobileCountries :many
+SELECT id, name, currency_name FROM countries WHERE is_active ORDER BY id
+`
+
+type MobileCountriesRow struct {
+	ID           int64
+	Name         string
+	CurrencyName string
+}
+
+func (q *Queries) MobileCountries(ctx context.Context) ([]MobileCountriesRow, error) {
+	rows, err := q.db.Query(ctx, mobileCountries)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MobileCountriesRow{}
+	for rows.Next() {
+		var i MobileCountriesRow
+		if err := rows.Scan(&i.ID, &i.Name, &i.CurrencyName); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const mobileGroupContributions = `-- name: MobileGroupContributions :many
+SELECT c.id, c.name, c.kind, c.amount::text AS amount, c.is_active, c.is_hidden,
+       s.frequency, s.rule, s.invoice_date, s.contribution_date,
+       coalesce(s.invoicing_active, false)::bool AS invoicing_active
+FROM contributions c
+LEFT JOIN contribution_schedules s ON s.contribution_id = c.id
+WHERE c.group_id = $1 AND c.deleted_at IS NULL
+ORDER BY c.name, c.id
+`
+
+type MobileGroupContributionsRow struct {
+	ID               int64
+	Name             string
+	Kind             ContributionKind
+	Amount           string
+	IsActive         bool
+	IsHidden         bool
+	Frequency        NullContributionFrequency
+	Rule             []byte
+	InvoiceDate      *time.Time
+	ContributionDate *time.Time
+	InvoicingActive  bool
+}
+
+func (q *Queries) MobileGroupContributions(ctx context.Context, groupID int64) ([]MobileGroupContributionsRow, error) {
+	rows, err := q.db.Query(ctx, mobileGroupContributions, groupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MobileGroupContributionsRow{}
+	for rows.Next() {
+		var i MobileGroupContributionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Kind,
+			&i.Amount,
+			&i.IsActive,
+			&i.IsHidden,
+			&i.Frequency,
+			&i.Rule,
+			&i.InvoiceDate,
+			&i.ContributionDate,
+			&i.InvoicingActive,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const mobileGroupMembers = `-- name: MobileGroupMembers :many
+SELECT m.id, m.user_id, m.is_official, m.group_role_id, r.name AS role_name, m.status,
+       u.first_name, u.middle_name, u.last_name, u.phone, u.email, u.avatar, u.last_login_at
+FROM memberships m
+JOIN users u ON u.id = m.user_id
+LEFT JOIN group_roles r ON r.id = m.group_role_id AND r.is_active
+WHERE m.group_id = $1 AND m.status <> 'removed'
+  AND (NOT $2::bool OR m.status = 'active')
+  AND ($3::bigint IS NULL OR m.id = $3)
+ORDER BY u.first_name, u.last_name, m.id
+LIMIT $5 OFFSET $4
+`
+
+type MobileGroupMembersParams struct {
+	GroupID      int64
+	ActiveOnly   bool
+	MembershipID *int64
+	Off          int32
+	Lim          int32
+}
+
+type MobileGroupMembersRow struct {
+	ID          int64
+	UserID      int64
+	IsOfficial  bool
+	GroupRoleID *int64
+	RoleName    *string
+	Status      MembershipStatus
+	FirstName   string
+	MiddleName  string
+	LastName    string
+	Phone       *string
+	Email       *string
+	Avatar      string
+	LastLoginAt *time.Time
+}
+
+// Members as the app lists them; removed members are left out.
+func (q *Queries) MobileGroupMembers(ctx context.Context, arg MobileGroupMembersParams) ([]MobileGroupMembersRow, error) {
+	rows, err := q.db.Query(ctx, mobileGroupMembers,
+		arg.GroupID,
+		arg.ActiveOnly,
+		arg.MembershipID,
+		arg.Off,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MobileGroupMembersRow{}
+	for rows.Next() {
+		var i MobileGroupMembersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.IsOfficial,
+			&i.GroupRoleID,
+			&i.RoleName,
+			&i.Status,
+			&i.FirstName,
+			&i.MiddleName,
+			&i.LastName,
+			&i.Phone,
+			&i.Email,
+			&i.Avatar,
+			&i.LastLoginAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const mobileGroupRoles = `-- name: MobileGroupRoles :many
+SELECT r.id, r.name, r.description, r.is_active, r.is_editable,
+       EXISTS (SELECT 1 FROM memberships m WHERE m.group_role_id = r.id AND m.status = 'active') AS in_use
+FROM group_roles r
+WHERE r.group_id = $1
+ORDER BY r.name, r.id
+LIMIT $3 OFFSET $2
+`
+
+type MobileGroupRolesParams struct {
+	GroupID int64
+	Off     int32
+	Lim     int32
+}
+
+type MobileGroupRolesRow struct {
+	ID          int64
+	Name        string
+	Description string
+	IsActive    bool
+	IsEditable  bool
+	InUse       bool
+}
+
+func (q *Queries) MobileGroupRoles(ctx context.Context, arg MobileGroupRolesParams) ([]MobileGroupRolesRow, error) {
+	rows, err := q.db.Query(ctx, mobileGroupRoles, arg.GroupID, arg.Off, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MobileGroupRolesRow{}
+	for rows.Next() {
+		var i MobileGroupRolesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Description,
+			&i.IsActive,
+			&i.IsEditable,
+			&i.InUse,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const mobileGroupTotals = `-- name: MobileGroupTotals :one
+SELECT coalesce(sum(CASE
+           WHEN e.entry_type IN ('contribution_payment', 'contribution_transfer_in', 'loan_to_contribution_transfer') THEN e.amount
+           WHEN e.entry_type IN ('contribution_refund', 'contribution_transfer_out', 'contribution_to_loan_transfer') THEN -e.amount
+       END), 0)::text AS contributions_paid,
+       coalesce(sum(e.amount) FILTER (WHERE e.entry_type IN ('fine_payment', 'contribution_to_fine_transfer', 'loan_to_fine_transfer')), 0)::text AS fines_paid
+FROM ledger_entries e
+WHERE e.group_id = $1 AND e.voided_at IS NULL
+`
+
+type MobileGroupTotalsRow struct {
+	ContributionsPaid string
+	FinesPaid         string
+}
+
+func (q *Queries) MobileGroupTotals(ctx context.Context, groupID int64) (MobileGroupTotalsRow, error) {
+	row := q.db.QueryRow(ctx, mobileGroupTotals, groupID)
+	var i MobileGroupTotalsRow
+	err := row.Scan(&i.ContributionsPaid, &i.FinesPaid)
+	return i, err
+}
+
+const mobileMemberContributionSummary = `-- name: MobileMemberContributionSummary :many
+SELECT c.id, c.name,
+       coalesce(sum(CASE
+           WHEN e.entry_type IN ('contribution_payment', 'contribution_transfer_in') THEN e.amount
+           WHEN e.entry_type IN ('contribution_refund', 'contribution_transfer_out', 'contribution_to_loan_transfer') THEN -e.amount
+       END), 0)::text AS paid,
+       coalesce(sum(r.sign * e.amount) FILTER (WHERE r.bucket = 'contribution'), 0)::text AS balance
+FROM contributions c
+JOIN ledger_entries e ON e.contribution_id = c.id AND e.membership_id = $1 AND e.voided_at IS NULL
+JOIN ledger_entry_rules r ON r.entry_type = e.entry_type
+WHERE c.group_id = $2 AND c.deleted_at IS NULL AND c.is_active AND NOT c.is_closed
+GROUP BY c.id, c.name
+ORDER BY 3 DESC, c.name
+`
+
+type MobileMemberContributionSummaryParams struct {
+	MembershipID *int64
+	GroupID      int64
+}
+
+type MobileMemberContributionSummaryRow struct {
+	ID      int64
+	Name    string
+	Paid    string
+	Balance string
+}
+
+// Paid and balance per open contribution for one member, largest paid first.
+func (q *Queries) MobileMemberContributionSummary(ctx context.Context, arg MobileMemberContributionSummaryParams) ([]MobileMemberContributionSummaryRow, error) {
+	rows, err := q.db.Query(ctx, mobileMemberContributionSummary, arg.MembershipID, arg.GroupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MobileMemberContributionSummaryRow{}
+	for rows.Next() {
+		var i MobileMemberContributionSummaryRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Paid,
+			&i.Balance,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const mobileMemberTotals = `-- name: MobileMemberTotals :many
+SELECT m.id AS membership_id,
+       coalesce(sum(CASE
+           WHEN e.entry_type IN ('contribution_payment', 'contribution_transfer_in', 'loan_to_contribution_transfer') THEN e.amount
+           WHEN e.entry_type IN ('contribution_refund', 'contribution_transfer_out', 'contribution_to_loan_transfer') THEN -e.amount
+       END), 0)::text AS contributions_paid,
+       coalesce(sum(r.sign * e.amount) FILTER (WHERE r.bucket = 'contribution'), 0)::text AS contribution_arrears,
+       coalesce(sum(e.amount) FILTER (WHERE e.entry_type IN ('fine_payment', 'contribution_to_fine_transfer', 'loan_to_fine_transfer')), 0)::text AS fines_paid,
+       coalesce(sum(r.sign * e.amount) FILTER (WHERE r.bucket = 'fine'), 0)::text AS fine_arrears
+FROM memberships m
+LEFT JOIN ledger_entries e ON e.membership_id = m.id AND e.group_id = m.group_id AND e.voided_at IS NULL
+LEFT JOIN ledger_entry_rules r ON r.entry_type = e.entry_type
+WHERE m.group_id = $1
+  AND ($2::bigint IS NULL OR m.id = $2)
+GROUP BY m.id
+`
+
+type MobileMemberTotalsParams struct {
+	GroupID      int64
+	MembershipID *int64
+}
+
+type MobileMemberTotalsRow struct {
+	MembershipID        int64
+	ContributionsPaid   string
+	ContributionArrears string
+	FinesPaid           string
+	FineArrears         string
+}
+
+// What each member has paid and owes, as the legacy dashboards add it up.
+// Contributions paid: payments and transfers in, less refunds, transfers out
+// (including to fines) and transfers to loans, plus loan repayments moved
+// into a contribution. Fines paid include contributions and loan repayments
+// moved to fines. Arrears are the contribution and fine balances.
+func (q *Queries) MobileMemberTotals(ctx context.Context, arg MobileMemberTotalsParams) ([]MobileMemberTotalsRow, error) {
+	rows, err := q.db.Query(ctx, mobileMemberTotals, arg.GroupID, arg.MembershipID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MobileMemberTotalsRow{}
+	for rows.Next() {
+		var i MobileMemberTotalsRow
+		if err := rows.Scan(
+			&i.MembershipID,
+			&i.ContributionsPaid,
+			&i.ContributionArrears,
+			&i.FinesPaid,
+			&i.FineArrears,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const mobileStatementEntries = `-- name: MobileStatementEntries :many
+SELECT e.id, e.entry_date, e.entry_type, e.legacy_type, e.amount::text AS amount, r.sign, c.name AS contribution_name
+FROM ledger_entries e
+JOIN ledger_entry_rules r ON r.entry_type = e.entry_type AND r.bucket = 'contribution'
+JOIN contributions c ON c.id = e.contribution_id
+WHERE e.group_id = $1 AND e.membership_id = $2 AND e.voided_at IS NULL
+  AND c.deleted_at IS NULL AND NOT c.is_closed
+ORDER BY e.entry_date, e.id
+`
+
+type MobileStatementEntriesParams struct {
+	GroupID      int64
+	MembershipID *int64
+}
+
+type MobileStatementEntriesRow struct {
+	ID               int64
+	EntryDate        time.Time
+	EntryType        LedgerEntryType
+	LegacyType       *int16
+	Amount           string
+	Sign             int16
+	ContributionName string
+}
+
+// One member's entries on open contributions, for the contribution statement.
+func (q *Queries) MobileStatementEntries(ctx context.Context, arg MobileStatementEntriesParams) ([]MobileStatementEntriesRow, error) {
+	rows, err := q.db.Query(ctx, mobileStatementEntries, arg.GroupID, arg.MembershipID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MobileStatementEntriesRow{}
+	for rows.Next() {
+		var i MobileStatementEntriesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.EntryDate,
+			&i.EntryType,
+			&i.LegacyType,
+			&i.Amount,
+			&i.Sign,
+			&i.ContributionName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const mobileUserGroups = `-- name: MobileUserGroups :many
 SELECT g.id, g.name, g.slug, g.email, g.phone, g.country_code, g.currency, g.status, g.settings,
        g.owner_user_id, m.id AS member_id, m.is_official, m.group_role_id,
@@ -186,6 +747,30 @@ func (q *Queries) MobileUserGroups(ctx context.Context, userID int64) ([]MobileU
 		return nil, err
 	}
 	return items, nil
+}
+
+const nextContributionDate = `-- name: NextContributionDate :one
+SELECT s.contribution_date
+FROM contribution_schedules s
+JOIN contributions c ON c.id = s.contribution_id
+WHERE c.group_id = $1 AND c.is_active AND c.deleted_at IS NULL AND c.kind IN ('regular', 'one_time')
+  AND s.contribution_date >= $2::date
+ORDER BY c.kind = 'regular' DESC, s.contribution_date
+LIMIT 1
+`
+
+type NextContributionDateParams struct {
+	GroupID int64
+	Today   time.Time
+}
+
+// The legacy dashboard's next contribution date: the earliest upcoming
+// date of an active regular contribution, else of a one-time one.
+func (q *Queries) NextContributionDate(ctx context.Context, arg NextContributionDateParams) (*time.Time, error) {
+	row := q.db.QueryRow(ctx, nextContributionDate, arg.GroupID, arg.Today)
+	var contribution_date *time.Time
+	err := row.Scan(&contribution_date)
+	return contribution_date, err
 }
 
 const upsertMobilePin = `-- name: UpsertMobilePin :exec
