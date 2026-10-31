@@ -77,7 +77,7 @@ INSERT INTO `deposits` (`id`, `type`, `account_id`, `group_id`, `deposit_date`, 
 (503, 99, 0, 15, 1690700000, 100, 1, '1.00', 1, NULL, NULL, NULL, 1690700000);
 
 INSERT INTO `withdrawals` (`id`, `type`, `account_id`, `group_id`, `withdrawal_date`, `withdrawal_method`, `amount`, `active`, `created_on`) VALUES
-(600, 1, 'bank-1', 15, 1690800000, 1, '400.00', 1, 1690800000);
+(600, 1, 'bank-bank-1', 15, 1690800000, 1, '400.00', 1, 1690800000);
 
 INSERT INTO `transaction_statements` (`id`, `transaction_type`, `transaction_date`, `account_id`, `deposit_id`, `withdrawal_id`, `group_id`, `member_id`, `amount`, `active`, `created_on`) VALUES
 (700, 1, 1690500000, 'bank-2', 500, NULL, 15, 100, '3000.50', 1, 1690500000),

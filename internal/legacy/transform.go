@@ -634,7 +634,7 @@ func (p *Plan) contributionMembers(rows []Row, contribs map[int64]*contribution,
 
 var FineRuleCols = []string{"id", "legacy_id", "contribution_id", "kind", "fixed_amount", "percentage_rate",
 	"percentage_of", "chargeable_on", "mode", "frequency", "fine_limit", "sms_notifications",
-	"email_notifications", "is_active", "created_at"}
+	"email_notifications", "is_active", "created_at", "next_fine_date"}
 
 func (p *Plan) fineRules(rows []Row, contribs map[int64]*contribution, now time.Time) {
 	for _, r := range byID(rows) {
@@ -684,6 +684,7 @@ func (p *Plan) fineRules(rows []Row, contribs map[int64]*contribution, now time.
 			id, id, cid, kind, fixed, rate, cleanPtr(r.Ptr("percentage_fine_on")), ch, mode, freq, limit,
 			r.Flag("fine_sms_notifications_enabled"), r.Flag("fine_email_notifications_enabled"),
 			r.Flag("active") && !r.Flag("is_deleted"), timeOr(epoch(r.Str("created_on")), now),
+			epochDate(r.Str("fine_date")),
 		})
 	}
 }

@@ -1128,6 +1128,8 @@ type ContributionFineRule struct {
 	EmailNotifications bool
 	IsActive           bool
 	CreatedAt          time.Time
+	NextFineDate       *time.Time
+	UpdatedAt          time.Time
 }
 
 type ContributionMember struct {
@@ -1310,6 +1312,19 @@ type IncomeCategory struct {
 	UpdatedAt   time.Time
 }
 
+type JobRun struct {
+	ID         int64
+	Job        string
+	RunDate    time.Time
+	Trigger    string
+	StartedAt  time.Time
+	FinishedAt *time.Time
+	Status     string
+	Summary    []byte
+	Error      string
+	StartedBy  *int64
+}
+
 type LedgerEntry struct {
 	ID             int64
 	LegacyID       *int32
@@ -1329,6 +1344,12 @@ type LedgerEntry struct {
 	DepositID      *int64
 	FineCategoryID *int64
 	WithdrawalID   *int64
+	GeneratedBy    *string
+	// For a contribution fine: the contribution invoice it fines (legacy invoices.parent_id)
+	ParentEntryID *int64
+	FineRuleID    *int64
+	CreatedBy     *int64
+	VoidedBy      *int64
 }
 
 type LedgerEntryRule struct {

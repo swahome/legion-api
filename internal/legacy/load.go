@@ -95,7 +95,7 @@ func Load(ctx context.Context, pool *pgxpool.Pool, p *Plan, replace bool) error 
 
 	return pgx.BeginFunc(ctx, conn.Conn(), func(tx pgx.Tx) error {
 		if replace {
-			_, err := tx.Exec(ctx, `TRUNCATE withdrawal_approvals, withdrawal_requests, ledger_entries, account_entries, account_transfers, withdrawals,
+			_, err := tx.Exec(ctx, `TRUNCATE job_runs, withdrawal_approvals, withdrawal_requests, ledger_entries, account_entries, account_transfers, withdrawals,
 				deposits, depositors, fine_categories, expense_categories, income_categories, group_accounts,
 				mobile_money_providers, sacco_branches, saccos, contribution_fine_rules, contribution_members,
 				contribution_schedules, contributions, memberships, group_roles, groups,

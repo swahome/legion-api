@@ -34,6 +34,12 @@ type Config struct {
 	// app API is off unless both are set.
 	MobileServerKey string
 	MobileAppCert   string
+
+	// Location is the calendar groups bill in (LEGION_TIMEZONE).
+	Location *time.Location
+	// BillingAt is the daily time of the invoicing and fines run in
+	// Location (LEGION_BILLING_AT, "off" turns the scheduler off).
+	BillingAt string
 }
 
 // LoadEnvFile reads KEY=VALUE pairs from LEGION_ENV_FILE, or ./.env when
@@ -64,6 +70,7 @@ func Load() (Config, error) {
 		DefaultCallingCode: getenv("LEGION_DEFAULT_CALLING_CODE", "254"),
 		MobileServerKey:    os.Getenv("LEGION_MOBILE_SERVER_KEY"),
 		MobileAppCert:      os.Getenv("LEGION_MOBILE_APP_CERT"),
+		BillingAt:          getenv("LEGION_BILLING_AT", "00:30"),
 	}
 	var err error
 	if c.AccessTTL, err = time.ParseDuration(getenv("LEGION_ACCESS_TTL", "15m")); err != nil {
@@ -77,6 +84,9 @@ func Load() (Config, error) {
 	}
 	if c.MigrateOnStart, err = strconv.ParseBool(getenv("LEGION_MIGRATE_ON_START", "false")); err != nil {
 		return c, fmt.Errorf("LEGION_MIGRATE_ON_START: %w", err)
+	}
+	if c.Location, err = time.LoadLocation(getenv("LEGION_TIMEZONE", "Africa/Nairobi")); err != nil {
+		return c, fmt.Errorf("LEGION_TIMEZONE: %w", err)
 	}
 	if c.DatabaseURL == "" {
 		return c, errors.New("DATABASE_URL is required")

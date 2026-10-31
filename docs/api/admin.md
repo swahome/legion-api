@@ -18,6 +18,13 @@ Paged lists take `page` (from 1) and `page_size` (1 to 200, default 50) and retu
 | GET | `/admin/audit` | The latest 100 admin actions |
 | GET | `/admin/transactions?group_id=&type=&from=&to=&include_voided=true` | Paged ledger entries across every group, newest first. Dates are `YYYY-MM-DD` |
 
+## Background jobs
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/admin/jobs?job=billing` | Paged run history, newest first: `run_date`, `trigger` (`schedule`, `manual` or `cli`), `status` (`running`, `succeeded`, `failed`), `summary` (counts of invoices and fines raised, schedules skipped and any `problems`), `error`, `started_by` |
+| POST | `/admin/jobs/billing/run` | Runs billing now in the background, for today or `{"date": "YYYY-MM-DD"}` (not in the future). 202; 409 `job_running` if a run is in progress. Re-running a day adds nothing it already raised |
+
 ## Groups
 
 | Method | Path | Purpose |

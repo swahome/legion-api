@@ -96,6 +96,14 @@ type accountIndex struct {
 // several candidates the account stays unknown rather than guessed.
 func (ix *accountIndex) resolve(groupID int64, kind, raw string) (id *int64, how string) {
 	raw = clean(raw)
+	// Some legacy rows repeat the prefix ("bank-bank-12").
+	for {
+		prefix, rest, ok := strings.Cut(raw, "-")
+		if _, known := legacyAccountPrefixes[prefix]; !ok || !known || !strings.HasPrefix(rest, prefix+"-") {
+			break
+		}
+		raw = rest
+	}
 	if prefix, num, ok := strings.Cut(raw, "-"); ok {
 		if k, known := legacyAccountPrefixes[prefix]; known {
 			n, _ := strconv.ParseInt(num, 10, 64)

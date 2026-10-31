@@ -20,7 +20,8 @@ SELECT * FROM contribution_schedules WHERE contribution_id = $1;
 
 -- name: ListContributionFineRules :many
 SELECT id, kind, fixed_amount, percentage_rate,
-       percentage_of, chargeable_on, mode, frequency, fine_limit, is_active
+       percentage_of, chargeable_on, mode, frequency, fine_limit, is_active,
+       sms_notifications, email_notifications, next_fine_date
 FROM contribution_fine_rules WHERE contribution_id = $1 ORDER BY id;
 
 -- name: ListContributionMemberIDs :many
@@ -45,10 +46,11 @@ WHERE group_id = sqlc.arg(group_id) AND id = sqlc.arg(id) AND deleted_at IS NULL
 -- name: UpsertContributionSchedule :exec
 INSERT INTO contribution_schedules (contribution_id, frequency, invoice_date, contribution_date,
                                     invoice_days_before, invoicing_active, sms_notifications,
-                                    email_notifications, fines_enabled)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                                    email_notifications, fines_enabled, rule)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, coalesce(sqlc.narg(rule)::jsonb, '{}'::jsonb))
 ON CONFLICT (contribution_id) DO UPDATE SET
     frequency = EXCLUDED.frequency,
+    rule = coalesce(sqlc.narg(rule)::jsonb, contribution_schedules.rule),
     invoice_date = EXCLUDED.invoice_date,
     contribution_date = EXCLUDED.contribution_date,
     invoice_days_before = EXCLUDED.invoice_days_before,
