@@ -217,7 +217,7 @@ func checkBalance(ctx context.Context, q *store.Queries, acct store.GroupAccount
 		return err
 	}
 	if cents(string(amount)) > cents(bal) {
-		return badRequest{"insufficient_balance", acct.Name + " has only " + money(bal) + "."}
+		return badRequest{"insufficient_balance", acct.Name + " holds " + money(bal) + ", which is not enough for this."}
 	}
 	return nil
 }
