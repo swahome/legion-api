@@ -91,3 +91,22 @@ are not back-billed. Fines carry `generated_by = 'fines'`; the unique index on
 loan, kind, date and installment makes a repeat run add nothing, and a fine an
 official waived stays waived. The run summary counts `loans_fined` and
 `loan_fines_raised`.
+
+## Applications
+
+Migration `00011_loan_applications.sql`, code in `internal/books/loan_applications.go`.
+
+| Table | Legacy | What it holds |
+|---|---|---|
+| `loan_applications` | `loan_applications` | A member's request: loan type, amount, installments, `status`, `decline_reason`, and `loan_id` once paid out |
+| `loan_application_guarantors` | `loan_guarantorship_requests` | Each guarantor asked, with amount, comment and their `decision` |
+| `loan_application_approvals` | `loan_signatory_requests` | Each signatory's `decision` |
+
+The flow follows legacy `toggle_loan_application_status`: guarantors first,
+then every signatory (active members with a group role, officials only when
+the group restricts wallet approvals, as for withdrawal requests), then an
+official pays it out. Legacy statuses 2, 3, 4 and 8 map to
+`pending_guarantors`, `pending_approval`, `approved` and `declined`.
+Legacy's configurable approval levels (`loan_type_workflows`) were empty in
+the dump and are not carried over. The 35 legacy applications in the dump (one
+test group, 2020) are not imported; their loans are.

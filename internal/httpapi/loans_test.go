@@ -253,3 +253,103 @@ func TestLoanFines(t *testing.T) {
 		t.Errorf("re-raised a waived fine: %+v", s)
 	}
 }
+
+func TestLoanApplications(t *testing.T) {
+	f := newMoneyFixture(t)
+	bank := f.account(map[string]any{"kind": "bank", "name": "Equity", "institution_id": f.bank, "initial_balance": "100000"})
+	r := f.post("/loan-types", map[string]any{"name": "Normal", "interest_type": "fixed_balance", "interest_rate": 10,
+		"rate_per": "month", "min_term": 1, "max_term": 6, "max_amount": "50000", "guarantors": "always", "min_guarantors": 1})
+	expect(t, r, 201)
+	typeID := f.id(r)
+	apply := map[string]any{"loan_type_id": typeID, "amount": "12000", "installments": 3, "description": "School fees",
+		"guarantors": []map[string]any{{"member_id": f.official, "amount": "6000", "comment": "My neighbour"}}}
+
+	for name, bad := range map[string]map[string]any{
+		"no guarantor": {"loan_type_id": typeID, "amount": "12000", "installments": 3},
+		"too long":     {"loan_type_id": typeID, "amount": "12000", "installments": 9, "guarantors": apply["guarantors"]},
+		"too much":     {"loan_type_id": typeID, "amount": "60000", "installments": 3, "guarantors": apply["guarantors"]},
+		"self":         {"loan_type_id": typeID, "amount": "100", "installments": 3, "guarantors": []map[string]any{{"member_id": f.member}}},
+	} {
+		if r := f.call("POST", f.memberTok, "/loan-applications", bad); r.code != 400 {
+			t.Errorf("%s: %d %s", name, r.code, r.raw)
+		}
+	}
+	expect(t, f.call("POST", f.memberTok, "/loan-applications", map[string]any{"member_id": f.official, "loan_type_id": typeID}), 403)
+
+	// Otieno applies; Jane is asked to guarantee.
+	r = f.call("POST", f.memberTok, "/loan-applications", apply)
+	expect(t, r, 201)
+	app := f.id(r)
+	path := fmt.Sprintf("/loan-applications/%d", app)
+	if r.body["status"] != "pending_guarantors" || r.body["can_cancel"] != true ||
+		r.body["schedule"].(map[string]any)["total"] != "15600.00" {
+		t.Fatalf("applied: %s", r.raw)
+	}
+	if g := f.get(f.officialTok, "/"); g.body["loan_applications_awaiting_me"] != float64(1) {
+		t.Errorf("awaiting jane: %s", g.raw)
+	}
+	expect(t, f.call("POST", f.memberTok, path+"/guarantee", map[string]any{"approve": true}), 409)
+	expect(t, f.call("POST", f.officialTok, path+"/guarantee", map[string]any{"approve": false}), 400)
+	// Jane guarantees. Otieno is a signatory too, so his own approval counts
+	// and the application waits on Jane as signatory.
+	secretary := f.scalar(`INSERT INTO group_roles (group_id, name) VALUES ($1, 'Secretary') RETURNING id`, f.group)
+	f.exec(`UPDATE memberships SET group_role_id = $1 WHERE id = $2`, secretary, f.member)
+	r = f.call("POST", f.officialTok, path+"/guarantee", map[string]any{"approve": true})
+	expect(t, r, 200)
+	if r.body["status"] != "pending_approval" || len(r.body["approval_list"].([]any)) != 2 || r.body["my_guarantee"] != "approved" {
+		t.Fatalf("guaranteed: %s", r.raw)
+	}
+	expect(t, f.post(path+"/disburse", map[string]any{"account_id": bank}), 409)
+	expect(t, f.post(path+"/approve", map[string]any{"password": "wrong"}), 401)
+	r = f.post(path+"/approve", map[string]any{"password": "pw"})
+	expect(t, r, 200)
+	if r.body["status"] != "approved" || r.body["can_disburse"] != true {
+		t.Fatalf("approved: %s", r.raw)
+	}
+	expect(t, f.call("POST", f.memberTok, path+"/disburse", map[string]any{"account_id": bank}), 403)
+	r = f.post(path+"/disburse", map[string]any{"account_id": bank, "disbursed_on": time.Now().Format(dateLayout), "method": "mpesa"})
+	expect(t, r, 200)
+	if r.body["status"] != "disbursed" || r.body["loan_id"] == nil {
+		t.Fatalf("disbursed: %s", r.raw)
+	}
+	loan := f.get(f.memberTok, fmt.Sprintf("/loans/%d", int64(r.body["loan_id"].(float64))))
+	expect(t, loan, 200)
+	if gs := loan.list("guarantors"); len(gs) != 1 || gs[0]["amount"] != "6000.00" || loan.body["description"] != "School fees" {
+		t.Errorf("loan from application: %s", loan.raw)
+	}
+	expect(t, f.post(path+"/disburse", map[string]any{"account_id": bank}), 409)
+
+	// A guarantor's decline declines it; the applicant can cancel an open one.
+	r = f.call("POST", f.memberTok, "/loan-applications", apply)
+	second := fmt.Sprintf("/loan-applications/%d", f.id(r))
+	r = f.call("POST", f.officialTok, second+"/guarantee", map[string]any{"approve": false, "reason": "Not this time"})
+	if r.body["status"] != "declined" || r.body["decline_reason"] != "A guarantor declined: Not this time" {
+		t.Errorf("declined: %s", r.raw)
+	}
+	r = f.call("POST", f.memberTok, "/loan-applications", apply)
+	third := fmt.Sprintf("/loan-applications/%d", f.id(r))
+	r = f.call("POST", f.memberTok, third+"/cancel", nil)
+	if r.body["status"] != "cancelled" {
+		t.Errorf("cancelled: %s", r.raw)
+	}
+	expect(t, f.call("POST", f.memberTok, third+"/cancel", nil), 409)
+
+	if n := len(pagedItems(f.get(f.memberTok, "/loan-applications"), "loan_applications")); n != 3 {
+		t.Errorf("member list: %d", n)
+	}
+	if n := len(pagedItems(f.get(f.officialTok, "/loan-applications?status=open"), "loan_applications")); n != 0 {
+		t.Errorf("open list: %d", n)
+	}
+
+	// Without signatories a type that needs approval can't take applications;
+	// one that doesn't is approved as soon as the guarantors agree.
+	f.exec(`UPDATE memberships SET group_role_id = NULL WHERE group_id = $1`, f.group)
+	expect(t, f.call("POST", f.memberTok, "/loan-applications", apply), 409)
+	f.exec(`UPDATE loan_types SET needs_approval = false WHERE id = $1`, typeID)
+	r = f.call("POST", f.memberTok, "/loan-applications", apply)
+	expect(t, r, 201)
+	r = f.call("POST", f.officialTok, fmt.Sprintf("/loan-applications/%d/guarantee", f.id(r)), map[string]any{"approve": true})
+	if r.body["status"] != "approved" {
+		t.Errorf("no approval needed: %s", r.raw)
+	}
+}

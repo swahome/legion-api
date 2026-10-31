@@ -226,3 +226,111 @@ UPDATE loan_charges SET next_fine_on = $2 WHERE id = $1;
 
 -- name: SetLoanNextBalanceFine :exec
 UPDATE loans SET next_balance_fine_on = $2 WHERE id = $1;
+
+-- name: CreateLoanApplication :one
+INSERT INTO loan_applications (group_id, membership_id, loan_type_id, amount, installments, description, status, created_by)
+VALUES ($1, $2, $3, sqlc.arg(amount)::numeric, $4, $5, $6, $7)
+RETURNING id;
+
+-- name: CreateApplicationGuarantor :exec
+INSERT INTO loan_application_guarantors (group_id, application_id, membership_id, amount, comment)
+VALUES ($1, $2, $3, sqlc.narg(amount)::numeric, $4);
+
+-- name: CreateApplicationApproval :exec
+INSERT INTO loan_application_approvals (group_id, application_id, membership_id, decision, decided_at, decided_by)
+VALUES ($1, $2, $3, sqlc.arg(decision)::approval_decision,
+        CASE WHEN sqlc.arg(decision)::approval_decision = 'pending' THEN NULL ELSE now() END, sqlc.narg(decided_by));
+
+-- name: GetLoanApplicationForUpdate :one
+SELECT * FROM loan_applications WHERE group_id = $1 AND id = $2 FOR UPDATE;
+
+-- name: SetLoanApplicationStatus :exec
+UPDATE loan_applications
+SET status = sqlc.arg(status), decline_reason = sqlc.arg(decline_reason), loan_id = coalesce(sqlc.narg(loan_id), loan_id),
+    decided_at = CASE WHEN sqlc.arg(status)::loan_application_status IN ('pending_guarantors', 'pending_approval')
+                      THEN decided_at ELSE coalesce(decided_at, now()) END,
+    updated_at = now()
+WHERE id = sqlc.arg(id);
+
+-- name: DecideApplicationGuarantor :execrows
+UPDATE loan_application_guarantors SET decision = sqlc.arg(decision), decided_at = now(), reason = sqlc.arg(reason)
+WHERE application_id = sqlc.arg(application_id) AND membership_id = sqlc.arg(membership_id) AND decision = 'pending';
+
+-- name: DecideApplicationApproval :execrows
+UPDATE loan_application_approvals SET decision = sqlc.arg(decision), decided_at = now(),
+    comment = sqlc.arg(comment), decided_by = sqlc.arg(decided_by)
+WHERE application_id = sqlc.arg(application_id) AND membership_id = sqlc.arg(membership_id) AND decision = 'pending';
+
+-- name: ApplicationTally :one
+SELECT (SELECT count(*) FROM loan_application_guarantors g WHERE g.application_id = $1) AS guarantors,
+       (SELECT count(*) FROM loan_application_guarantors g WHERE g.application_id = $1 AND g.decision = 'approved') AS guarantors_approved,
+       (SELECT count(*) FROM loan_application_guarantors g WHERE g.application_id = $1 AND g.decision = 'declined') AS guarantors_declined,
+       (SELECT count(*) FROM loan_application_approvals a WHERE a.application_id = $1) AS signatories,
+       (SELECT count(*) FROM loan_application_approvals a WHERE a.application_id = $1 AND a.decision = 'approved') AS signatories_approved,
+       (SELECT count(*) FROM loan_application_approvals a WHERE a.application_id = $1 AND a.decision = 'declined') AS signatories_declined;
+
+-- name: ListLoanApplications :many
+-- Applications newest first. A member who isn't an official sees their own
+-- and those they are asked to guarantee or approve (viewer).
+SELECT a.id, a.membership_id, (u.first_name || ' ' || u.last_name)::text AS member_name, a.loan_type_id,
+       t.name AS loan_type_name, a.amount::text AS amount, a.installments, a.description, a.status, a.decline_reason,
+       a.decided_at, a.loan_id, a.created_at,
+       EXISTS (SELECT 1 FROM loan_application_guarantors g WHERE g.application_id = a.id
+               AND g.membership_id = sqlc.arg(viewer) AND g.decision = 'pending' AND a.status = 'pending_guarantors')::bool AS awaiting_my_guarantee,
+       EXISTS (SELECT 1 FROM loan_application_approvals x WHERE x.application_id = a.id
+               AND x.membership_id = sqlc.arg(viewer) AND x.decision = 'pending' AND a.status = 'pending_approval')::bool AS awaiting_my_approval,
+       count(*) OVER () AS total
+FROM loan_applications a
+JOIN memberships m ON m.id = a.membership_id
+JOIN users u ON u.id = m.user_id
+JOIN loan_types t ON t.id = a.loan_type_id
+WHERE a.group_id = sqlc.arg(group_id)
+  AND (sqlc.arg(status)::text = '' OR a.status::text = sqlc.arg(status)
+       OR (sqlc.arg(status) = 'open' AND a.status IN ('pending_guarantors', 'pending_approval', 'approved')))
+  AND (sqlc.narg(membership_id)::bigint IS NULL OR a.membership_id = sqlc.narg(membership_id))
+  AND (sqlc.arg(all_visible)::bool OR a.membership_id = sqlc.arg(viewer)
+       OR EXISTS (SELECT 1 FROM loan_application_guarantors g WHERE g.application_id = a.id AND g.membership_id = sqlc.arg(viewer))
+       OR EXISTS (SELECT 1 FROM loan_application_approvals x WHERE x.application_id = a.id AND x.membership_id = sqlc.arg(viewer)))
+  AND (NOT sqlc.arg(awaiting_me)::bool
+       OR EXISTS (SELECT 1 FROM loan_application_guarantors g WHERE g.application_id = a.id AND g.membership_id = sqlc.arg(viewer)
+                  AND g.decision = 'pending' AND a.status = 'pending_guarantors')
+       OR EXISTS (SELECT 1 FROM loan_application_approvals x WHERE x.application_id = a.id AND x.membership_id = sqlc.arg(viewer)
+                  AND x.decision = 'pending' AND a.status = 'pending_approval'))
+ORDER BY a.created_at DESC, a.id DESC
+LIMIT sqlc.arg(lim) OFFSET sqlc.arg(off);
+
+-- name: ApplicationGuarantors :many
+SELECT g.id, g.membership_id, (u.first_name || ' ' || u.last_name)::text AS member_name,
+       coalesce(g.amount, 0)::text AS amount, (g.amount IS NULL)::bool AS no_amount, g.comment, g.decision,
+       g.decided_at, g.reason
+FROM loan_application_guarantors g
+JOIN memberships m ON m.id = g.membership_id
+JOIN users u ON u.id = m.user_id
+WHERE g.application_id = $1
+ORDER BY g.id;
+
+-- name: ApplicationApprovals :many
+SELECT x.id, x.membership_id, (u.first_name || ' ' || u.last_name)::text AS member_name, r.name AS role_name,
+       x.decision, x.decided_at, x.comment
+FROM loan_application_approvals x
+JOIN memberships m ON m.id = x.membership_id
+JOIN users u ON u.id = m.user_id
+LEFT JOIN group_roles r ON r.id = m.group_role_id
+WHERE x.application_id = $1
+ORDER BY x.id;
+
+-- name: CountLoanApplicationsAwaiting :one
+SELECT ((SELECT count(*) FROM loan_application_guarantors g JOIN loan_applications a ON a.id = g.application_id
+        WHERE g.membership_id = $1 AND g.decision = 'pending' AND a.status = 'pending_guarantors')
+     + (SELECT count(*) FROM loan_application_approvals x JOIN loan_applications a ON a.id = x.application_id
+        WHERE x.membership_id = $1 AND x.decision = 'pending' AND a.status = 'pending_approval'))::bigint AS awaiting;
+
+-- name: GetLoanApplication :one
+SELECT a.id, a.membership_id, (u.first_name || ' ' || u.last_name)::text AS member_name, a.loan_type_id,
+       t.name AS loan_type_name, a.amount::text AS amount, a.installments, a.description, a.status, a.decline_reason,
+       a.decided_at, a.loan_id, a.created_at
+FROM loan_applications a
+JOIN memberships m ON m.id = a.membership_id
+JOIN users u ON u.id = m.user_id
+JOIN loan_types t ON t.id = a.loan_type_id
+WHERE a.group_id = $1 AND a.id = $2;

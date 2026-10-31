@@ -99,6 +99,22 @@ and the legacy type codes.
 | POST | `/loans/{id}/repayments/{rid}/void` | official | Also voids the deposit. Voiding the deposit voids the repayment too |
 | POST | `/loans/{id}/fines/{cid}/void` | official | Waives one fine |
 
+| GET | `/loan-applications?status=&member_id=&awaiting=me&page=&page_size=` | member or official | Newest first. Members see their own and those they are asked to guarantee or approve; `awaiting=me` lists those waiting on the caller. `status` is a status below or `open` |
+| GET | `/loan-applications/{id}` | as above | Adds `guarantors` (each with `decision`), `approval_list`, `my_guarantee`, `my_decision`, `can_cancel`, `can_disburse`, and while open the `schedule` it would have if paid out today |
+| POST | `/loan-applications` | member | `loan_type_id`, `amount`, `installments` (left out for a fixed-term type), `description`, `guarantors` (`member_id`, `amount`, `comment`). Checked against the type like a loan. An official may add `member_id` to apply for someone else, and may use a hidden type. 409 `not_enough_signatories` when the type needs approval and the group has no role holders |
+| POST | `/loan-applications/{id}/guarantee` | the guarantor | `approve` true, or false with a `reason` (declines the application) |
+| POST | `/loan-applications/{id}/approve` | signatory | `password` |
+| POST | `/loan-applications/{id}/decline` | signatory | `password`, `reason` |
+| POST | `/loan-applications/{id}/cancel` | the applicant or an official | The applicant cancels; an official declines with a `reason` |
+| POST | `/loan-applications/{id}/disburse` | official | Pays out an approved application: `account_id`, `disbursed_on`, optional `method`, `first_due_on`, `description`, `skip_processing_fee`. Records the loan with the guarantors who agreed and sets `loan_id` |
+
+An application's `status` runs `pending_guarantors` (skipped without
+guarantors) → `pending_approval` (skipped when the type doesn't need approval)
+→ `approved` → `disbursed`, or ends `declined` or `cancelled`. One guarantor's
+or signatory's decline declines it; every signatory must approve, and an
+applicant who is a signatory counts as approving. `GET /v1/groups/{id}` also
+gives `loan_applications_awaiting_me`.
+
 A loan's disbursement withdrawal can't be voided on its own (409
 `loan_disbursement`); void the loan. See `docs/schema/loans.md` for the
 schedule rules and legacy codes.

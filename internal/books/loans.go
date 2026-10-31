@@ -424,6 +424,29 @@ func (n *NewLoan) fitType(ctx context.Context, q *store.Queries, groupID int64, 
 	return nil
 }
 
+// checkGuarantors checks that each guarantor is another active member of
+// the group, listed once, with a sensible amount.
+func checkGuarantors(ctx context.Context, q *store.Queries, groupID, memberID int64, gs []Guarantor) error {
+	seen := map[int64]bool{}
+	for i, g := range gs {
+		if g.MemberID == memberID {
+			return Error{"invalid_guarantor", "A member cannot guarantee their own loan."}
+		}
+		if seen[g.MemberID] {
+			return Error{"invalid_guarantor", "Each guarantor is listed once."}
+		}
+		seen[g.MemberID] = true
+		if err := checkAmountPtr(gs[i].Amount, "guaranteed_amount"); err != nil {
+			return err
+		}
+		if err := Found("invalid_guarantor", "A guarantor is not a member of this group.")(
+			q.ActiveMembershipInGroup(ctx, store.ActiveMembershipInGroupParams{GroupID: groupID, ID: g.MemberID})); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // RecordLoan records a loan that has been paid out: the loan, the
 // disbursement (a loan_disbursement withdrawal out of the account), its
 // installments, the processing fee (loan processing income into the same
@@ -437,22 +460,8 @@ func RecordLoan(ctx context.Context, q *store.Queries, groupID, userID int64, n 
 		q.ActiveMembershipInGroup(ctx, store.ActiveMembershipInGroupParams{GroupID: groupID, ID: n.MemberID})); err != nil {
 		return 0, err
 	}
-	seen := map[int64]bool{}
-	for i, g := range n.Guarantors {
-		if g.MemberID == n.MemberID {
-			return 0, Error{"invalid_guarantor", "A member cannot guarantee their own loan."}
-		}
-		if seen[g.MemberID] {
-			return 0, Error{"invalid_guarantor", "Each guarantor is listed once."}
-		}
-		seen[g.MemberID] = true
-		if err := checkAmountPtr(n.Guarantors[i].Amount, "guaranteed_amount"); err != nil {
-			return 0, err
-		}
-		if err := Found("invalid_guarantor", "A guarantor is not a member of this group.")(
-			q.ActiveMembershipInGroup(ctx, store.ActiveMembershipInGroupParams{GroupID: groupID, ID: g.MemberID})); err != nil {
-			return 0, err
-		}
+	if err := checkGuarantors(ctx, q, groupID, n.MemberID, n.Guarantors); err != nil {
+		return 0, err
 	}
 	acct, err := OpenAccount(ctx, q, groupID, n.AccountID)
 	if err != nil {

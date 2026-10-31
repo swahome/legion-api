@@ -132,6 +132,13 @@ func (s *Server) Routes() http.Handler {
 				r.Get("/loans", s.listLoans)
 				r.Post("/loans/preview", s.previewLoan)
 				r.Get("/loans/{loanID}", s.getLoan)
+				r.Get("/loan-applications", s.listLoanApplications)
+				r.Post("/loan-applications", s.createLoanApplication)
+				r.Get("/loan-applications/{applicationID}", s.getLoanApplication)
+				r.Post("/loan-applications/{applicationID}/guarantee", s.guaranteeLoanApplication)
+				r.Post("/loan-applications/{applicationID}/approve", s.approveLoanApplication)
+				r.Post("/loan-applications/{applicationID}/decline", s.declineLoanApplication)
+				r.Post("/loan-applications/{applicationID}/cancel", s.cancelLoanApplication)
 
 				r.Group(func(r chi.Router) {
 					r.Use(requireOfficial)
@@ -184,6 +191,7 @@ func (s *Server) Routes() http.Handler {
 					r.Post("/loans/{loanID}/repayments", s.createRepayment)
 					r.Post("/loans/{loanID}/repayments/{repaymentID}/void", s.voidRepayment)
 					r.Post("/loans/{loanID}/fines/{chargeID}/void", s.voidLoanFine)
+					r.Post("/loan-applications/{applicationID}/disburse", s.disburseLoanApplication)
 				})
 			})
 		})

@@ -544,10 +544,19 @@ func (s *Server) previewLoan(w http.ResponseWriter, r *http.Request) {
 	if writeLoanError(w, r, err) {
 		return
 	}
-	sched, err := terms.Schedule()
+	out, err := scheduleJSON(terms, fee)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_terms", err.Error())
 		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// scheduleJSON is a loan's schedule and totals as the preview shows them.
+func scheduleJSON(terms loans.Terms, fee int64) (map[string]any, error) {
+	sched, err := terms.Schedule()
+	if err != nil {
+		return nil, err
 	}
 	items := make([]map[string]any, 0, len(sched))
 	var total int64
@@ -556,10 +565,10 @@ func (s *Server) previewLoan(w http.ResponseWriter, r *http.Request) {
 		items = append(items, map[string]any{"number": i.Number, "due_on": Date{i.DueDate}, "principal": centsText(i.Principal),
 			"interest": centsText(i.Interest), "amount": centsText(i.Amount())})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	return map[string]any{
 		"amount": centsText(terms.Amount), "interest": centsText(loans.Interest(sched)), "total": centsText(total),
 		"processing_fee": centsText(fee), "ends_on": Date{sched[len(sched)-1].DueDate}, "installments": items,
-	})
+	}, nil
 }
 
 type loanPatch struct {

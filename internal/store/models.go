@@ -787,6 +787,76 @@ func AllLedgerEntryTypeValues() []LedgerEntryType {
 	}
 }
 
+type LoanApplicationStatus string
+
+const (
+	LoanApplicationStatusPendingGuarantors LoanApplicationStatus = "pending_guarantors"
+	LoanApplicationStatusPendingApproval   LoanApplicationStatus = "pending_approval"
+	LoanApplicationStatusApproved          LoanApplicationStatus = "approved"
+	LoanApplicationStatusDisbursed         LoanApplicationStatus = "disbursed"
+	LoanApplicationStatusDeclined          LoanApplicationStatus = "declined"
+	LoanApplicationStatusCancelled         LoanApplicationStatus = "cancelled"
+)
+
+func (e *LoanApplicationStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = LoanApplicationStatus(s)
+	case string:
+		*e = LoanApplicationStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for LoanApplicationStatus: %T", src)
+	}
+	return nil
+}
+
+type NullLoanApplicationStatus struct {
+	LoanApplicationStatus LoanApplicationStatus
+	Valid                 bool // Valid is true if LoanApplicationStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullLoanApplicationStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.LoanApplicationStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.LoanApplicationStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullLoanApplicationStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.LoanApplicationStatus), nil
+}
+
+func (e LoanApplicationStatus) Valid() bool {
+	switch e {
+	case LoanApplicationStatusPendingGuarantors,
+		LoanApplicationStatusPendingApproval,
+		LoanApplicationStatusApproved,
+		LoanApplicationStatusDisbursed,
+		LoanApplicationStatusDeclined,
+		LoanApplicationStatusCancelled:
+		return true
+	}
+	return false
+}
+
+func AllLoanApplicationStatusValues() []LoanApplicationStatus {
+	return []LoanApplicationStatus{
+		LoanApplicationStatusPendingGuarantors,
+		LoanApplicationStatusPendingApproval,
+		LoanApplicationStatusApproved,
+		LoanApplicationStatusDisbursed,
+		LoanApplicationStatusDeclined,
+		LoanApplicationStatusCancelled,
+	}
+}
+
 type LoanChargeKind string
 
 const (
@@ -1648,6 +1718,46 @@ type Loan struct {
 	UpdatedAt         time.Time
 	VoidedAt          *time.Time
 	VoidedBy          *int64
+}
+
+type LoanApplication struct {
+	ID            int64
+	GroupID       int64
+	MembershipID  int64
+	LoanTypeID    int64
+	Amount        pgtype.Numeric
+	Installments  int32
+	Description   string
+	Status        LoanApplicationStatus
+	DeclineReason string
+	DecidedAt     *time.Time
+	LoanID        *int64
+	CreatedBy     *int64
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+type LoanApplicationApproval struct {
+	ID            int64
+	GroupID       int64
+	ApplicationID int64
+	MembershipID  int64
+	Decision      ApprovalDecision
+	DecidedAt     *time.Time
+	DecidedBy     *int64
+	Comment       string
+}
+
+type LoanApplicationGuarantor struct {
+	ID            int64
+	GroupID       int64
+	ApplicationID int64
+	MembershipID  int64
+	Amount        pgtype.Numeric
+	Comment       string
+	Decision      ApprovalDecision
+	DecidedAt     *time.Time
+	Reason        string
 }
 
 type LoanCharge struct {

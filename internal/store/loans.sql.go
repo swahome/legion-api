@@ -12,6 +12,203 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const applicationApprovals = `-- name: ApplicationApprovals :many
+SELECT x.id, x.membership_id, (u.first_name || ' ' || u.last_name)::text AS member_name, r.name AS role_name,
+       x.decision, x.decided_at, x.comment
+FROM loan_application_approvals x
+JOIN memberships m ON m.id = x.membership_id
+JOIN users u ON u.id = m.user_id
+LEFT JOIN group_roles r ON r.id = m.group_role_id
+WHERE x.application_id = $1
+ORDER BY x.id
+`
+
+type ApplicationApprovalsRow struct {
+	ID           int64
+	MembershipID int64
+	MemberName   string
+	RoleName     *string
+	Decision     ApprovalDecision
+	DecidedAt    *time.Time
+	Comment      string
+}
+
+func (q *Queries) ApplicationApprovals(ctx context.Context, applicationID int64) ([]ApplicationApprovalsRow, error) {
+	rows, err := q.db.Query(ctx, applicationApprovals, applicationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ApplicationApprovalsRow{}
+	for rows.Next() {
+		var i ApplicationApprovalsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MembershipID,
+			&i.MemberName,
+			&i.RoleName,
+			&i.Decision,
+			&i.DecidedAt,
+			&i.Comment,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const applicationGuarantors = `-- name: ApplicationGuarantors :many
+SELECT g.id, g.membership_id, (u.first_name || ' ' || u.last_name)::text AS member_name,
+       coalesce(g.amount, 0)::text AS amount, (g.amount IS NULL)::bool AS no_amount, g.comment, g.decision,
+       g.decided_at, g.reason
+FROM loan_application_guarantors g
+JOIN memberships m ON m.id = g.membership_id
+JOIN users u ON u.id = m.user_id
+WHERE g.application_id = $1
+ORDER BY g.id
+`
+
+type ApplicationGuarantorsRow struct {
+	ID           int64
+	MembershipID int64
+	MemberName   string
+	Amount       string
+	NoAmount     bool
+	Comment      string
+	Decision     ApprovalDecision
+	DecidedAt    *time.Time
+	Reason       string
+}
+
+func (q *Queries) ApplicationGuarantors(ctx context.Context, applicationID int64) ([]ApplicationGuarantorsRow, error) {
+	rows, err := q.db.Query(ctx, applicationGuarantors, applicationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ApplicationGuarantorsRow{}
+	for rows.Next() {
+		var i ApplicationGuarantorsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MembershipID,
+			&i.MemberName,
+			&i.Amount,
+			&i.NoAmount,
+			&i.Comment,
+			&i.Decision,
+			&i.DecidedAt,
+			&i.Reason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const applicationTally = `-- name: ApplicationTally :one
+SELECT (SELECT count(*) FROM loan_application_guarantors g WHERE g.application_id = $1) AS guarantors,
+       (SELECT count(*) FROM loan_application_guarantors g WHERE g.application_id = $1 AND g.decision = 'approved') AS guarantors_approved,
+       (SELECT count(*) FROM loan_application_guarantors g WHERE g.application_id = $1 AND g.decision = 'declined') AS guarantors_declined,
+       (SELECT count(*) FROM loan_application_approvals a WHERE a.application_id = $1) AS signatories,
+       (SELECT count(*) FROM loan_application_approvals a WHERE a.application_id = $1 AND a.decision = 'approved') AS signatories_approved,
+       (SELECT count(*) FROM loan_application_approvals a WHERE a.application_id = $1 AND a.decision = 'declined') AS signatories_declined
+`
+
+type ApplicationTallyRow struct {
+	Guarantors          int64
+	GuarantorsApproved  int64
+	GuarantorsDeclined  int64
+	Signatories         int64
+	SignatoriesApproved int64
+	SignatoriesDeclined int64
+}
+
+func (q *Queries) ApplicationTally(ctx context.Context, applicationID int64) (ApplicationTallyRow, error) {
+	row := q.db.QueryRow(ctx, applicationTally, applicationID)
+	var i ApplicationTallyRow
+	err := row.Scan(
+		&i.Guarantors,
+		&i.GuarantorsApproved,
+		&i.GuarantorsDeclined,
+		&i.Signatories,
+		&i.SignatoriesApproved,
+		&i.SignatoriesDeclined,
+	)
+	return i, err
+}
+
+const countLoanApplicationsAwaiting = `-- name: CountLoanApplicationsAwaiting :one
+SELECT ((SELECT count(*) FROM loan_application_guarantors g JOIN loan_applications a ON a.id = g.application_id
+        WHERE g.membership_id = $1 AND g.decision = 'pending' AND a.status = 'pending_guarantors')
+     + (SELECT count(*) FROM loan_application_approvals x JOIN loan_applications a ON a.id = x.application_id
+        WHERE x.membership_id = $1 AND x.decision = 'pending' AND a.status = 'pending_approval'))::bigint AS awaiting
+`
+
+func (q *Queries) CountLoanApplicationsAwaiting(ctx context.Context, membershipID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countLoanApplicationsAwaiting, membershipID)
+	var awaiting int64
+	err := row.Scan(&awaiting)
+	return awaiting, err
+}
+
+const createApplicationApproval = `-- name: CreateApplicationApproval :exec
+INSERT INTO loan_application_approvals (group_id, application_id, membership_id, decision, decided_at, decided_by)
+VALUES ($1, $2, $3, $4::approval_decision,
+        CASE WHEN $4::approval_decision = 'pending' THEN NULL ELSE now() END, $5)
+`
+
+type CreateApplicationApprovalParams struct {
+	GroupID       int64
+	ApplicationID int64
+	MembershipID  int64
+	Decision      ApprovalDecision
+	DecidedBy     *int64
+}
+
+func (q *Queries) CreateApplicationApproval(ctx context.Context, arg CreateApplicationApprovalParams) error {
+	_, err := q.db.Exec(ctx, createApplicationApproval,
+		arg.GroupID,
+		arg.ApplicationID,
+		arg.MembershipID,
+		arg.Decision,
+		arg.DecidedBy,
+	)
+	return err
+}
+
+const createApplicationGuarantor = `-- name: CreateApplicationGuarantor :exec
+INSERT INTO loan_application_guarantors (group_id, application_id, membership_id, amount, comment)
+VALUES ($1, $2, $3, $5::numeric, $4)
+`
+
+type CreateApplicationGuarantorParams struct {
+	GroupID       int64
+	ApplicationID int64
+	MembershipID  int64
+	Comment       string
+	Amount        pgtype.Numeric
+}
+
+func (q *Queries) CreateApplicationGuarantor(ctx context.Context, arg CreateApplicationGuarantorParams) error {
+	_, err := q.db.Exec(ctx, createApplicationGuarantor,
+		arg.GroupID,
+		arg.ApplicationID,
+		arg.MembershipID,
+		arg.Comment,
+		arg.Amount,
+	)
+	return err
+}
+
 const createLoan = `-- name: CreateLoan :one
 
 INSERT INTO loans (group_id, membership_id, loan_type_id, amount, disbursed_on, account_id, interest_type,
@@ -78,6 +275,39 @@ func (q *Queries) CreateLoan(ctx context.Context, arg CreateLoanParams) (int64, 
 		arg.InterestRate,
 		arg.FixedInterest,
 		arg.FixedInterestRate,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const createLoanApplication = `-- name: CreateLoanApplication :one
+INSERT INTO loan_applications (group_id, membership_id, loan_type_id, amount, installments, description, status, created_by)
+VALUES ($1, $2, $3, $8::numeric, $4, $5, $6, $7)
+RETURNING id
+`
+
+type CreateLoanApplicationParams struct {
+	GroupID      int64
+	MembershipID int64
+	LoanTypeID   int64
+	Installments int32
+	Description  string
+	Status       LoanApplicationStatus
+	CreatedBy    *int64
+	Amount       pgtype.Numeric
+}
+
+func (q *Queries) CreateLoanApplication(ctx context.Context, arg CreateLoanApplicationParams) (int64, error) {
+	row := q.db.QueryRow(ctx, createLoanApplication,
+		arg.GroupID,
+		arg.MembershipID,
+		arg.LoanTypeID,
+		arg.Installments,
+		arg.Description,
+		arg.Status,
+		arg.CreatedBy,
+		arg.Amount,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -273,6 +503,59 @@ func (q *Queries) CreateLoanType(ctx context.Context, arg CreateLoanTypeParams) 
 	return id, err
 }
 
+const decideApplicationApproval = `-- name: DecideApplicationApproval :execrows
+UPDATE loan_application_approvals SET decision = $1, decided_at = now(),
+    comment = $2, decided_by = $3
+WHERE application_id = $4 AND membership_id = $5 AND decision = 'pending'
+`
+
+type DecideApplicationApprovalParams struct {
+	Decision      ApprovalDecision
+	Comment       string
+	DecidedBy     *int64
+	ApplicationID int64
+	MembershipID  int64
+}
+
+func (q *Queries) DecideApplicationApproval(ctx context.Context, arg DecideApplicationApprovalParams) (int64, error) {
+	result, err := q.db.Exec(ctx, decideApplicationApproval,
+		arg.Decision,
+		arg.Comment,
+		arg.DecidedBy,
+		arg.ApplicationID,
+		arg.MembershipID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const decideApplicationGuarantor = `-- name: DecideApplicationGuarantor :execrows
+UPDATE loan_application_guarantors SET decision = $1, decided_at = now(), reason = $2
+WHERE application_id = $3 AND membership_id = $4 AND decision = 'pending'
+`
+
+type DecideApplicationGuarantorParams struct {
+	Decision      ApprovalDecision
+	Reason        string
+	ApplicationID int64
+	MembershipID  int64
+}
+
+func (q *Queries) DecideApplicationGuarantor(ctx context.Context, arg DecideApplicationGuarantorParams) (int64, error) {
+	result, err := q.db.Exec(ctx, decideApplicationGuarantor,
+		arg.Decision,
+		arg.Reason,
+		arg.ApplicationID,
+		arg.MembershipID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteLoanType = `-- name: DeleteLoanType :execrows
 UPDATE loan_types SET deleted_at = now(), updated_at = now()
 WHERE group_id = $1 AND id = $2 AND deleted_at IS NULL
@@ -326,6 +609,90 @@ func (q *Queries) DueLoanFines(ctx context.Context, today time.Time) ([]DueLoanF
 		return nil, err
 	}
 	return items, nil
+}
+
+const getLoanApplication = `-- name: GetLoanApplication :one
+SELECT a.id, a.membership_id, (u.first_name || ' ' || u.last_name)::text AS member_name, a.loan_type_id,
+       t.name AS loan_type_name, a.amount::text AS amount, a.installments, a.description, a.status, a.decline_reason,
+       a.decided_at, a.loan_id, a.created_at
+FROM loan_applications a
+JOIN memberships m ON m.id = a.membership_id
+JOIN users u ON u.id = m.user_id
+JOIN loan_types t ON t.id = a.loan_type_id
+WHERE a.group_id = $1 AND a.id = $2
+`
+
+type GetLoanApplicationParams struct {
+	GroupID int64
+	ID      int64
+}
+
+type GetLoanApplicationRow struct {
+	ID            int64
+	MembershipID  int64
+	MemberName    string
+	LoanTypeID    int64
+	LoanTypeName  string
+	Amount        string
+	Installments  int32
+	Description   string
+	Status        LoanApplicationStatus
+	DeclineReason string
+	DecidedAt     *time.Time
+	LoanID        *int64
+	CreatedAt     time.Time
+}
+
+func (q *Queries) GetLoanApplication(ctx context.Context, arg GetLoanApplicationParams) (GetLoanApplicationRow, error) {
+	row := q.db.QueryRow(ctx, getLoanApplication, arg.GroupID, arg.ID)
+	var i GetLoanApplicationRow
+	err := row.Scan(
+		&i.ID,
+		&i.MembershipID,
+		&i.MemberName,
+		&i.LoanTypeID,
+		&i.LoanTypeName,
+		&i.Amount,
+		&i.Installments,
+		&i.Description,
+		&i.Status,
+		&i.DeclineReason,
+		&i.DecidedAt,
+		&i.LoanID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getLoanApplicationForUpdate = `-- name: GetLoanApplicationForUpdate :one
+SELECT id, group_id, membership_id, loan_type_id, amount, installments, description, status, decline_reason, decided_at, loan_id, created_by, created_at, updated_at FROM loan_applications WHERE group_id = $1 AND id = $2 FOR UPDATE
+`
+
+type GetLoanApplicationForUpdateParams struct {
+	GroupID int64
+	ID      int64
+}
+
+func (q *Queries) GetLoanApplicationForUpdate(ctx context.Context, arg GetLoanApplicationForUpdateParams) (LoanApplication, error) {
+	row := q.db.QueryRow(ctx, getLoanApplicationForUpdate, arg.GroupID, arg.ID)
+	var i LoanApplication
+	err := row.Scan(
+		&i.ID,
+		&i.GroupID,
+		&i.MembershipID,
+		&i.LoanTypeID,
+		&i.Amount,
+		&i.Installments,
+		&i.Description,
+		&i.Status,
+		&i.DeclineReason,
+		&i.DecidedAt,
+		&i.LoanID,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const getLoanForUpdate = `-- name: GetLoanForUpdate :one
@@ -555,6 +922,113 @@ func (q *Queries) GetLoanView(ctx context.Context, arg GetLoanViewParams) (GetLo
 		&i.AccountName,
 	)
 	return i, err
+}
+
+const listLoanApplications = `-- name: ListLoanApplications :many
+SELECT a.id, a.membership_id, (u.first_name || ' ' || u.last_name)::text AS member_name, a.loan_type_id,
+       t.name AS loan_type_name, a.amount::text AS amount, a.installments, a.description, a.status, a.decline_reason,
+       a.decided_at, a.loan_id, a.created_at,
+       EXISTS (SELECT 1 FROM loan_application_guarantors g WHERE g.application_id = a.id
+               AND g.membership_id = $1 AND g.decision = 'pending' AND a.status = 'pending_guarantors')::bool AS awaiting_my_guarantee,
+       EXISTS (SELECT 1 FROM loan_application_approvals x WHERE x.application_id = a.id
+               AND x.membership_id = $1 AND x.decision = 'pending' AND a.status = 'pending_approval')::bool AS awaiting_my_approval,
+       count(*) OVER () AS total
+FROM loan_applications a
+JOIN memberships m ON m.id = a.membership_id
+JOIN users u ON u.id = m.user_id
+JOIN loan_types t ON t.id = a.loan_type_id
+WHERE a.group_id = $2
+  AND ($3::text = '' OR a.status::text = $3
+       OR ($3 = 'open' AND a.status IN ('pending_guarantors', 'pending_approval', 'approved')))
+  AND ($4::bigint IS NULL OR a.membership_id = $4)
+  AND ($5::bool OR a.membership_id = $1
+       OR EXISTS (SELECT 1 FROM loan_application_guarantors g WHERE g.application_id = a.id AND g.membership_id = $1)
+       OR EXISTS (SELECT 1 FROM loan_application_approvals x WHERE x.application_id = a.id AND x.membership_id = $1))
+  AND (NOT $6::bool
+       OR EXISTS (SELECT 1 FROM loan_application_guarantors g WHERE g.application_id = a.id AND g.membership_id = $1
+                  AND g.decision = 'pending' AND a.status = 'pending_guarantors')
+       OR EXISTS (SELECT 1 FROM loan_application_approvals x WHERE x.application_id = a.id AND x.membership_id = $1
+                  AND x.decision = 'pending' AND a.status = 'pending_approval'))
+ORDER BY a.created_at DESC, a.id DESC
+LIMIT $8 OFFSET $7
+`
+
+type ListLoanApplicationsParams struct {
+	Viewer       int64
+	GroupID      int64
+	Status       string
+	MembershipID *int64
+	AllVisible   bool
+	AwaitingMe   bool
+	Off          int32
+	Lim          int32
+}
+
+type ListLoanApplicationsRow struct {
+	ID                  int64
+	MembershipID        int64
+	MemberName          string
+	LoanTypeID          int64
+	LoanTypeName        string
+	Amount              string
+	Installments        int32
+	Description         string
+	Status              LoanApplicationStatus
+	DeclineReason       string
+	DecidedAt           *time.Time
+	LoanID              *int64
+	CreatedAt           time.Time
+	AwaitingMyGuarantee bool
+	AwaitingMyApproval  bool
+	Total               int64
+}
+
+// Applications newest first. A member who isn't an official sees their own
+// and those they are asked to guarantee or approve (viewer).
+func (q *Queries) ListLoanApplications(ctx context.Context, arg ListLoanApplicationsParams) ([]ListLoanApplicationsRow, error) {
+	rows, err := q.db.Query(ctx, listLoanApplications,
+		arg.Viewer,
+		arg.GroupID,
+		arg.Status,
+		arg.MembershipID,
+		arg.AllVisible,
+		arg.AwaitingMe,
+		arg.Off,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListLoanApplicationsRow{}
+	for rows.Next() {
+		var i ListLoanApplicationsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MembershipID,
+			&i.MemberName,
+			&i.LoanTypeID,
+			&i.LoanTypeName,
+			&i.Amount,
+			&i.Installments,
+			&i.Description,
+			&i.Status,
+			&i.DeclineReason,
+			&i.DecidedAt,
+			&i.LoanID,
+			&i.CreatedAt,
+			&i.AwaitingMyGuarantee,
+			&i.AwaitingMyApproval,
+			&i.Total,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listLoanTypes = `-- name: ListLoanTypes :many
@@ -1061,6 +1535,32 @@ type SetDepositLoanParams struct {
 
 func (q *Queries) SetDepositLoan(ctx context.Context, arg SetDepositLoanParams) error {
 	_, err := q.db.Exec(ctx, setDepositLoan, arg.ID, arg.LoanID)
+	return err
+}
+
+const setLoanApplicationStatus = `-- name: SetLoanApplicationStatus :exec
+UPDATE loan_applications
+SET status = $1, decline_reason = $2, loan_id = coalesce($3, loan_id),
+    decided_at = CASE WHEN $1::loan_application_status IN ('pending_guarantors', 'pending_approval')
+                      THEN decided_at ELSE coalesce(decided_at, now()) END,
+    updated_at = now()
+WHERE id = $4
+`
+
+type SetLoanApplicationStatusParams struct {
+	Status        LoanApplicationStatus
+	DeclineReason string
+	LoanID        *int64
+	ID            int64
+}
+
+func (q *Queries) SetLoanApplicationStatus(ctx context.Context, arg SetLoanApplicationStatusParams) error {
+	_, err := q.db.Exec(ctx, setLoanApplicationStatus,
+		arg.Status,
+		arg.DeclineReason,
+		arg.LoanID,
+		arg.ID,
+	)
 	return err
 }
 
