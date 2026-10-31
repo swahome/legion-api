@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/swahome/legion-api/internal/auth"
+	"github.com/swahome/legion-api/internal/books"
 	"github.com/swahome/legion-api/internal/store"
 )
 
@@ -207,18 +208,18 @@ func (rc *recipient) check() error {
 	switch rc.Type {
 	case "mobile":
 		if rc.Phone == "" {
-			return badRequest{"invalid_recipient", "A mobile money recipient needs a phone number."}
+			return badRequest{Code: "invalid_recipient", Msg: "A mobile money recipient needs a phone number."}
 		}
 	case "paybill":
 		if rc.Paybill == "" {
-			return badRequest{"invalid_recipient", "A paybill recipient needs the paybill number."}
+			return badRequest{Code: "invalid_recipient", Msg: "A paybill recipient needs the paybill number."}
 		}
 	case "bank":
 		if rc.BankID == 0 || rc.AccountNumber == "" || rc.AccountName == "" {
-			return badRequest{"invalid_recipient", "A bank recipient needs the bank, account number and account name."}
+			return badRequest{Code: "invalid_recipient", Msg: "A bank recipient needs the bank, account number and account name."}
 		}
 	default:
-		return badRequest{"invalid_recipient", "recipient.type must be mobile, paybill or bank."}
+		return badRequest{Code: "invalid_recipient", Msg: "recipient.type must be mobile, paybill or bank."}
 	}
 	return nil
 }
@@ -258,7 +259,7 @@ func (s *Server) createWithdrawalRequest(w http.ResponseWriter, r *http.Request)
 	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
 		ctx, q := r.Context(), s.q.WithTx(tx)
 		if req.Amount == nil || cents(string(*req.Amount)) <= 0 {
-			return badRequest{"invalid_amount", "amount must be more than zero."}
+			return badRequest{Code: "invalid_amount", Msg: "amount must be more than zero."}
 		}
 		kind := store.WithdrawalKind(req.Kind)
 		acct, err := openAccount(ctx, q, a.Group.ID, req.AccountID)
@@ -268,32 +269,32 @@ func (s *Server) createWithdrawalRequest(w http.ResponseWriter, r *http.Request)
 		switch {
 		case kind == store.WithdrawalKindFundsTransfer:
 			if req.ToAccountID == nil {
-				return badRequest{"missing_fields", "to_account_id is required for a transfer."}
+				return badRequest{Code: "missing_fields", Msg: "to_account_id is required for a transfer."}
 			}
 			if req.ExpenseCategoryID != nil || req.MemberID != nil || req.ContributionID != nil || req.Recipient != nil {
-				return badRequest{"invalid_body", "A transfer only names the two accounts."}
+				return badRequest{Code: "invalid_body", Msg: "A transfer only names the two accounts."}
 			}
-			if _, _, err := transferAccounts(ctx, q, a.Group.ID, acct.ID, *req.ToAccountID); err != nil {
+			if _, _, err := books.TransferAccounts(ctx, q, a.Group.ID, acct.ID, *req.ToAccountID); err != nil {
 				return err
 			}
-		case recordableWithdrawals[kind]:
+		case books.RecordableWithdrawals[kind]:
 			if req.ToAccountID != nil {
-				return badRequest{"invalid_body", "to_account_id is only for transfers."}
+				return badRequest{Code: "invalid_body", Msg: "to_account_id is only for transfers."}
 			}
-			if err := checkMoneyOut(ctx, q, a.Group.ID, moneyOut{kind: kind, amount: *req.Amount, memberID: req.MemberID,
-				contributionID: req.ContributionID, expenseCategoryID: req.ExpenseCategoryID}); err != nil {
+			if err := books.CheckWithdrawal(ctx, q, a.Group.ID, books.Withdrawal{Kind: kind, Amount: string(*req.Amount), MemberID: req.MemberID,
+				ContributionID: req.ContributionID, ExpenseCategoryID: req.ExpenseCategoryID}); err != nil {
 				return err
 			}
 			if req.Recipient == nil {
-				return badRequest{"missing_fields", "recipient is required: who is being paid."}
+				return badRequest{Code: "missing_fields", Msg: "recipient is required: who is being paid."}
 			}
 			if err := req.Recipient.check(); err != nil {
 				return err
 			}
 		default:
-			return badRequest{"invalid_kind", "kind must be expense, contribution_refund or funds_transfer."}
+			return badRequest{Code: "invalid_kind", Msg: "kind must be expense, contribution_refund or funds_transfer."}
 		}
-		if err := checkBalance(ctx, q, acct, *req.Amount); err != nil {
+		if err := books.CheckBalance(ctx, q, acct, string(*req.Amount)); err != nil {
 			return err
 		}
 		signatories, err := q.GroupSignatories(ctx, store.GroupSignatoriesParams{
@@ -352,7 +353,7 @@ func writeMoneyError(w http.ResponseWriter, r *http.Request, err error) bool {
 	case err == nil:
 		return false
 	case errors.As(err, &bad):
-		writeError(w, http.StatusBadRequest, bad.code, bad.msg)
+		writeError(w, http.StatusBadRequest, bad.Code, bad.Msg)
 	case errors.As(err, &cf):
 		writeError(w, http.StatusConflict, cf.code, cf.msg)
 	case errors.Is(err, errNotFound):
@@ -409,10 +410,10 @@ func (s *Server) decideWithdrawalRequest(w http.ResponseWriter, r *http.Request,
 	var id int64
 	err := func() error {
 		if body.Password == "" {
-			return badRequest{"missing_fields", "Enter your password to answer a withdrawal request."}
+			return badRequest{Code: "missing_fields", Msg: "Enter your password to answer a withdrawal request."}
 		}
 		if decision == store.ApprovalDecisionDeclined && body.Reason == "" {
-			return badRequest{"missing_fields", "Say why you are declining."}
+			return badRequest{Code: "missing_fields", Msg: "Say why you are declining."}
 		}
 		if a.MembershipID == nil {
 			return conflict{"not_a_signatory", "You are not a signatory on this request."}
@@ -527,13 +528,13 @@ func (s *Server) payWithdrawalRequest(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if x.AccountID == nil {
-			return badRequest{"invalid_account", "The request has no account to pay from."}
+			return badRequest{Code: "invalid_account", Msg: "The request has no account to pay from."}
 		}
 		acct, err := openAccount(ctx, q, a.Group.ID, *x.AccountID)
 		if err != nil {
 			return err
 		}
-		if err := checkBalance(ctx, q, acct, amount); err != nil {
+		if err := books.CheckBalance(ctx, q, acct, string(amount)); err != nil {
 			return err
 		}
 		desc := x.Description
@@ -543,24 +544,24 @@ func (s *Server) payWithdrawalRequest(w http.ResponseWriter, r *http.Request) {
 		var wid, tid *int64
 		if x.Kind == store.WithdrawalKindFundsTransfer {
 			if x.ToAccountID == nil {
-				return badRequest{"invalid_account", "The request has no account to transfer to."}
+				return badRequest{Code: "invalid_account", Msg: "The request has no account to transfer to."}
 			}
-			from, to, err := transferAccounts(ctx, q, a.Group.ID, acct.ID, *x.ToAccountID)
+			from, to, err := books.TransferAccounts(ctx, q, a.Group.ID, acct.ID, *x.ToAccountID)
 			if err != nil {
 				return err
 			}
-			t, err := recordTransfer(ctx, q, from, to, amount, body.Date.Time, desc, userID)
+			t, err := books.WriteTransfer(ctx, q, from, to, string(amount), body.Date.Time, desc, userID)
 			if err != nil {
 				return err
 			}
 			tid = &t
 		} else {
-			m := moneyOut{kind: x.Kind, amount: amount, memberID: x.MembershipID,
-				contributionID: x.ContributionID, expenseCategoryID: x.ExpenseCategoryID}
-			if err := checkMoneyOut(ctx, q, a.Group.ID, m); err != nil {
+			m := books.Withdrawal{Kind: x.Kind, Amount: string(amount), MemberID: x.MembershipID,
+				ContributionID: x.ContributionID, ExpenseCategoryID: x.ExpenseCategoryID}
+			if err := books.CheckWithdrawal(ctx, q, a.Group.ID, m); err != nil {
 				return err
 			}
-			wd, err := recordWithdrawal(ctx, q, acct, m, body.Method, body.Date.Time, desc, userID)
+			wd, err := books.WriteWithdrawal(ctx, q, acct, m, body.Method, body.Date.Time, desc, userID)
 			if err != nil {
 				return err
 			}

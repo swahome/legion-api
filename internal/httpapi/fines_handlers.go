@@ -2,11 +2,11 @@ package httpapi
 
 import (
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/swahome/legion-api/internal/books"
 	"github.com/swahome/legion-api/internal/store"
 )
 
@@ -151,44 +151,19 @@ func (s *Server) fineMembers(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	req.Description = strings.TrimSpace(req.Description)
-	if err := checkAmountDate(req.Amount, req.Date, nil, "fine"); writeMoneyError(w, r, err) {
-		return
+	amount := ""
+	if req.Amount != nil {
+		amount = string(*req.Amount)
 	}
-	if len(req.MemberIDs) == 0 || len(req.MemberIDs) > 500 {
-		writeError(w, http.StatusBadRequest, "missing_fields", "Pick the members to fine (up to 500 at a time).")
-		return
+	var date *time.Time
+	if req.Date != nil {
+		date = &req.Date.Time
 	}
 	userID := claimsFrom(r.Context()).UserID
 	var ids []int64
-	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
-		q := s.q.WithTx(tx)
-		ctx := r.Context()
-		if err := found("invalid_fine_category", "Pick one of the group's fine categories.")(
-			q.FineCategoryInGroup(ctx, store.FineCategoryInGroupParams{GroupID: a.Group.ID, ID: req.FineCategoryID})); err != nil {
-			return err
-		}
-		seen := map[int64]bool{}
-		for _, mid := range req.MemberIDs {
-			if seen[mid] {
-				continue
-			}
-			seen[mid] = true
-			if err := found("invalid_member", "One of those members is not in this group.")(
-				q.ActiveMembershipInGroup(ctx, store.ActiveMembershipInGroupParams{GroupID: a.Group.ID, ID: mid})); err != nil {
-				return err
-			}
-			m, cat := mid, req.FineCategoryID
-			id, err := q.CreateManualFine(ctx, store.CreateManualFineParams{
-				GroupID: a.Group.ID, MembershipID: &m, Amount: string(*req.Amount), FineDate: req.Date.Time,
-				Description: req.Description, FineCategoryID: &cat, CreatedBy: &userID,
-			})
-			if err != nil {
-				return err
-			}
-			ids = append(ids, id)
-		}
-		return nil
+	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) (err error) {
+		ids, err = books.FineMembers(r.Context(), s.q.WithTx(tx), a.Group.ID, userID, req.MemberIDs, req.FineCategoryID, amount, date, req.Description)
+		return err
 	})
 	if writeMoneyError(w, r, err) {
 		return

@@ -136,7 +136,7 @@ func writeFineRules(ctx context.Context, q *store.Queries, contributionID int64,
 	keep := []int64{}
 	for _, f := range *rules {
 		if f.ID != nil && !known[*f.ID] {
-			return badRequest{"invalid_fine_rule", "That fine rule is not on this contribution."}
+			return badRequest{Code: "invalid_fine_rule", Msg: "That fine rule is not on this contribution."}
 		}
 		active := f.IsActive == nil || *f.IsActive
 		var fixed *string
@@ -147,7 +147,7 @@ func writeFineRules(ctx context.Context, q *store.Queries, contributionID int64,
 		fr, err := billing.RuleFromRow(store.FineKind(f.Kind), deref(fixed), deref(f.PercentageRate), deref(f.PercentageOf),
 			f.ChargeableOn, &f.Mode, &f.Frequency, f.FineLimit)
 		if err != nil {
-			return badRequest{"invalid_fine_rule", err.Error()}
+			return badRequest{Code: "invalid_fine_rule", Msg: err.Error()}
 		}
 		next := firstFineDate(fr, due)
 		mode, freq := f.Mode, f.Frequency
