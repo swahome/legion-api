@@ -11,9 +11,9 @@ import (
 	"github.com/swahome/legion-api/internal/store"
 )
 
-// The dashboards add up the ledger. Loans, expenses, account balances,
-// notifications and bank alerts come with later milestones; until then
-// they are 0 or empty, in the shapes the app expects.
+// The dashboards add up the ledger, deposits, expenses and account
+// balances. Loans, notifications and bank alerts come with later
+// milestones; until then they are 0 or empty, in the shapes the app expects.
 
 func suspendedReply(now time.Time) map[string]any {
 	return timed(status(0, "Could not proceed. Account is suspended"), now)
@@ -76,6 +76,10 @@ func (s *Server) getMemberDashboardData(ctx context.Context, c *call, g *member)
 	} else if name != "" {
 		role = name
 	}
+	recent, err := s.recentDeposits(ctx, g, &g.m.ID, 5)
+	if err != nil {
+		return nil, err
+	}
 	return map[string]any{
 		"status":                         1,
 		"time":                           s.now().Unix(),
@@ -94,7 +98,7 @@ func (s *Server) getMemberDashboardData(ctx context.Context, c *call, g *member)
 			"total_arrears":               total,
 			"next_contribution_date":      mobileShortTime(next),
 			"contribution_date_days_left": elapsed(next, s.now()),
-			"recent_transactions":         []any{}, // deposits arrive with milestone 3
+			"recent_transactions":         recent,
 			"member_contribution_summary": summary,
 		},
 	}, nil
@@ -143,6 +147,14 @@ func (s *Server) getGroupDashboardData(ctx context.Context, c *call, g *member) 
 	if err != nil {
 		return nil, err
 	}
+	expenses, err := s.q.MobileGroupExpenses(ctx, g.group.ID)
+	if err != nil {
+		return nil, err
+	}
+	bank, cash, accounts, err := s.cashBalances(ctx, g)
+	if err != nil {
+		return nil, err
+	}
 	return map[string]any{
 		"status": 1,
 		"time":   s.now().Unix(),
@@ -152,10 +164,10 @@ func (s *Server) getGroupDashboardData(ctx context.Context, c *call, g *member) 
 			"total_loan_balances":    0,
 			"total_loaned_amount":    0,
 			"total_loan_repaid":      0,
-			"total_expense_payments": 0,
-			"bank_balances":          0,
-			"cash_balances":          0,
-			"account_balances":       []any{},
+			"total_expense_payments": amount(expenses),
+			"bank_balances":          bank,
+			"cash_balances":          cash,
+			"account_balances":       accounts,
 		},
 		"notification_count":             0,
 		"has_partner_bank":               0,

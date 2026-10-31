@@ -87,6 +87,31 @@ func New(pool *pgxpool.Pool, keys *Keys, authSvc *auth.Service, otp OTPSender) *
 		"contributions/get_group_contribution_options":  {fn: s.groupAction(6, s.getGroupContributionOptions)},
 		"contributions/get_member_contribution_options": {fn: s.groupAction(6, s.getMemberContributionOptions)},
 		"statements/contribution_statement":             {fn: s.groupAction(0, s.contributionStatement)},
+
+		// Milestone 3: money, read side.
+		"get_member_recent_transactions":                             {fn: s.groupAction(0, s.recentTransactions(false))},
+		"get_group_recent_transactions":                              {fn: s.groupAction(0, s.recentTransactions(true))},
+		"accounts/get_group_account_options":                         {fn: s.groupAction(6, s.accountOptions(false))},
+		"accounts/get_group_active_account_options":                  {fn: s.groupAction(6, s.accountOptions(true))},
+		"bank_accounts/get_group_bank_accounts_list":                 {fn: s.groupAction(6, s.accountsList("bank"))},
+		"sacco_accounts/get_group_sacco_accounts_list":               {fn: s.groupAction(6, s.accountsList("sacco"))},
+		"mobile_money_accounts/get_group_mobile_money_accounts_list": {fn: s.groupAction(6, s.accountsList("mobile_money"))},
+		"petty_cash_accounts/get_group_petty_cash_accounts_list":     {fn: s.groupAction(6, s.accountsList("petty_cash"))},
+		"income_categories/group_income_categories_list":             {fn: s.groupAction(6, s.categoryList("income"))},
+		"income_categories/get_group_income_category_options":        {fn: s.groupAction(6, s.categoryOptions("income"))},
+		"expense_categories/get_group_expense_categories":            {fn: s.groupAction(6, s.categoryList("expense"))},
+		"expense_categories/get_group_expense_category_options":      {fn: s.groupAction(6, s.categoryOptions("expense"))},
+		"fine_categories/group_fine_categories_list":                 {fn: s.groupAction(6, s.categoryList("fine"))},
+		"fine_categories/get_group_fine_category_options":            {fn: s.groupAction(6, s.categoryOptions("fine"))},
+		"depositors/get_group_depositor_options":                     {fn: s.groupAction(6, s.depositorOptions)},
+		"deposits/get_deposits_list":                                 {fn: s.groupAction(6, s.depositsList)},
+		"deposits/get_group_deposit":                                 {fn: s.groupAction(6, s.groupDeposit)},
+		"withdrawals/get_group_withdrawal_list":                      {fn: s.groupAction(6, s.withdrawalsList)},
+		"withdrawals/get_group_withdrawal":                           {fn: s.groupAction(6, s.groupWithdrawal)},
+		"invoices/get_group_invoices":                                {fn: s.groupAction(6, s.invoicesList)},
+		"invoices/get_group_invoice":                                 {fn: s.groupAction(6, s.groupInvoice)},
+		"fines/get_group_fines_list":                                 {fn: s.groupAction(6, s.finesList)},
+		"fines/get_group_fine_options":                               {fn: s.groupAction(6, s.fineOptions)},
 	}
 	return s
 }
@@ -260,4 +285,33 @@ func (q request) Str(key string) string {
 func (q request) Int(key string) int64 {
 	n, _ := strconv.ParseInt(q.Str(key), 10, 64)
 	return n
+}
+
+// Strs reads a list the app sends as a JSON array (or a single value).
+func (q request) Strs(key string) []string {
+	switch v := q[key].(type) {
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, x := range v {
+			out = append(out, request{"v": x}.Str("v"))
+		}
+		return out
+	case nil:
+		return nil
+	}
+	if s := q.Str(key); s != "" {
+		return []string{s}
+	}
+	return nil
+}
+
+// IDs reads a list of positive ids, ignoring anything else.
+func (q request) IDs(key string) []int64 {
+	var out []int64
+	for _, s := range q.Strs(key) {
+		if n, err := strconv.ParseInt(s, 10, 64); err == nil && n > 0 {
+			out = append(out, n)
+		}
+	}
+	return out
 }

@@ -61,7 +61,17 @@ used, as before.
 | `mobile/contributions/get_group_contribution` | One contribution (`id`) with its schedule under the legacy column names, its fines and its members |
 | `mobile/contributions/get_group_contribution_options`, `get_member_contribution_options` | Active, visible contributions; the member version adds the caller's balance on each |
 | `mobile/statements/contribution_statement` | The last six months of a member's contribution statement (`member_id`, or the caller) |
-| `mobile/get_member_dashboard_data`, `get_group_dashboard_data`, `get_group_member_contribution_summary` | Dashboard totals from the ledger |
+| `mobile/get_member_dashboard_data`, `get_group_dashboard_data`, `get_group_member_contribution_summary` | Dashboard totals from the ledger, with bank and cash balances, expenses and recent deposits |
+| `mobile/get_member_recent_transactions`, `get_group_recent_transactions` | The latest deposits (`limit`, default 5) of the caller or of the group |
+| `mobile/accounts/get_group_account_options`, `get_group_active_account_options` | The group's accounts by kind for pickers; the active version leaves out closed accounts. The app sends an account back as `bank-<id>`, `sacco-<id>`, `mobile-<id>` or `petty-<id>`, as before |
+| `mobile/bank_accounts/get_group_bank_accounts_list`, `sacco_accounts/…`, `mobile_money_accounts/…`, `petty_cash_accounts/get_group_petty_cash_accounts_list` | Each kind's accounts with balances. Bank accounts say whether the bank is a partner and the account verified |
+| `mobile/income_categories/group_income_categories_list`, `expense_categories/get_group_expense_categories`, `fine_categories/group_fine_categories_list` | All categories, paged |
+| `mobile/income_categories/get_group_income_category_options`, `expense_categories/get_group_expense_category_options`, `fine_categories/get_group_fine_category_options` | Active, visible categories |
+| `mobile/depositors/get_group_depositor_options` | Outside payers, with email or phone as `identity` |
+| `mobile/deposits/get_deposits_list`, `get_group_deposit` | Deposits newest first (paged, 20 by default), filtered by the app's `status` type numbers and `members`, sorted by `sort_by`; one deposit as a receipt with the amount in words |
+| `mobile/withdrawals/get_group_withdrawal_list`, `get_group_withdrawal` | The same for money out |
+| `mobile/invoices/get_group_invoices`, `get_group_invoice`, `fines/get_group_fines_list` | Invoices and fines with `amount_paid`. Legion keeps payments against a member's balance, not against single invoices, so `amount_paid` settles the oldest charge first (per contribution for contribution invoices) |
+| `mobile/fines/get_group_fine_options` | Contributions that charge late fines and fine categories, with the caller's fine balance on each |
 
 Group actions check the user (status 4), the group (status 5) and the caller's membership (status 6, or 0 where the old action used 0), and record the user as seen, as before. Two things differ:
 
@@ -70,7 +80,7 @@ Group actions check the user (status 4), the group (status 5) and the caller's m
 
 **Totals.** Contributions paid are payments and transfers in, less refunds, transfers out (including to fines) and transfers to loans, plus loan repayments moved into a contribution. Fines paid include contributions and loan repayments moved to fines. Arrears are the contribution and fine balances, or 0 when the group disables arrears.
 
-**Not there yet.** Until milestones 3 and 4 port deposits, expenses, accounts and loans, these come back as 0 or empty in the shapes the app expects: loan balances, expenses, bank and cash balances, recent transactions, notification and unreconciled counts. Groups that disable arrears got a deposits-only statement in the old app; for now they get the regular contribution statement.
+**Not there yet.** Until milestone 4 ports loans, and later milestones notifications and bank alerts, these come back as 0 or empty in the shapes the app expects: loan balances, notification and unreconciled counts. Deposits are all "Manually recorded" until bank reconciliation arrives. Groups that disable arrears got a deposits-only statement in the old app; for now they get the regular contribution statement.
 
 The other actions answer HTTP 404 until their milestone ports them.
 
