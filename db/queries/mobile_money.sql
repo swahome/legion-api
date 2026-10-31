@@ -113,3 +113,48 @@ WHERE group_id = $1 AND voided_at IS NULL AND kind = 'expense';
 
 -- name: PartnerBankIDs :many
 SELECT id FROM banks WHERE is_partner;
+
+-- name: MobileWithdrawalRequests :many
+-- Withdrawal requests for the app, with every signatory's tally and the
+-- caller's own answer ('' when they aren't a signatory on it).
+SELECT r.id, r.kind, r.status, r.amount::text AS amount, r.description, r.recipient, r.decline_reason,
+       r.requested_by, r.membership_id, r.created_at, r.created_by,
+       coalesce(trim(ru.first_name || ' ' || ru.last_name), '')::text AS requested_by_name,
+       coalesce(trim(u.first_name || ' ' || u.last_name), '')::text AS member_name,
+       coalesce(ec.name, '')::text AS expense_category_name, coalesce(c.name, '')::text AS contribution_name,
+       coalesce(a.name, '')::text AS account_name, coalesce(ta.name, '')::text AS to_account_name,
+       coalesce(b.name, '')::text AS recipient_bank_name,
+       (SELECT count(*) FROM withdrawal_approvals x WHERE x.withdrawal_request_id = r.id AND x.decision = 'approved') AS approved,
+       (SELECT count(*) FROM withdrawal_approvals x WHERE x.withdrawal_request_id = r.id AND x.decision = 'declined') AS declined,
+       (SELECT count(*) FROM withdrawal_approvals x WHERE x.withdrawal_request_id = r.id AND x.decision = 'pending') AS pending,
+       coalesce((SELECT x.decision::text FROM withdrawal_approvals x
+                 WHERE x.withdrawal_request_id = r.id AND x.membership_id = sqlc.arg(caller)::bigint LIMIT 1), '')::text AS my_decision
+FROM withdrawal_requests r
+LEFT JOIN memberships rm ON rm.id = r.requested_by
+LEFT JOIN users ru ON ru.id = rm.user_id
+LEFT JOIN memberships m ON m.id = r.membership_id
+LEFT JOIN users u ON u.id = m.user_id
+LEFT JOIN expense_categories ec ON ec.id = r.expense_category_id
+LEFT JOIN contributions c ON c.id = r.contribution_id
+LEFT JOIN group_accounts a ON a.id = r.account_id
+LEFT JOIN group_accounts ta ON ta.id = r.to_account_id
+LEFT JOIN banks b ON b.id = CASE WHEN r.recipient ? 'bank_id' AND jsonb_typeof(r.recipient -> 'bank_id') = 'number'
+                                  THEN (r.recipient ->> 'bank_id')::bigint END
+WHERE r.group_id = sqlc.arg(group_id)
+  AND (sqlc.narg(id)::bigint IS NULL OR r.id = sqlc.narg(id))
+  AND (coalesce(cardinality(sqlc.arg(statuses)::text[]), 0) = 0 OR r.status::text = ANY (sqlc.arg(statuses)::text[]))
+  AND (coalesce(cardinality(sqlc.arg(member_ids)::bigint[]), 0) = 0 OR r.requested_by = ANY (sqlc.arg(member_ids)::bigint[]))
+ORDER BY CASE WHEN sqlc.arg(sort)::text = 'amount_asc' THEN r.amount END ASC,
+         CASE WHEN sqlc.arg(sort)::text = 'amount_desc' THEN r.amount END DESC,
+         CASE WHEN sqlc.arg(sort)::text = 'date_asc' THEN r.created_at END ASC,
+         r.created_at DESC, r.id DESC
+LIMIT sqlc.arg(lim) OFFSET sqlc.arg(off);
+
+-- name: MobileExpenseCategoryTotals :many
+SELECT coalesce(ec.name, '')::text AS name, sum(w.amount)::text AS total
+FROM withdrawals w
+LEFT JOIN expense_categories ec ON ec.id = w.expense_category_id
+WHERE w.group_id = $1 AND w.voided_at IS NULL AND w.kind = 'expense'
+GROUP BY ec.id, ec.name
+HAVING sum(w.amount) <> 0
+ORDER BY ec.name NULLS LAST;

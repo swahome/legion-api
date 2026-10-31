@@ -115,6 +115,41 @@ func (q *Queries) MobileDeposits(ctx context.Context, arg MobileDepositsParams) 
 	return items, nil
 }
 
+const mobileExpenseCategoryTotals = `-- name: MobileExpenseCategoryTotals :many
+SELECT coalesce(ec.name, '')::text AS name, sum(w.amount)::text AS total
+FROM withdrawals w
+LEFT JOIN expense_categories ec ON ec.id = w.expense_category_id
+WHERE w.group_id = $1 AND w.voided_at IS NULL AND w.kind = 'expense'
+GROUP BY ec.id, ec.name
+HAVING sum(w.amount) <> 0
+ORDER BY ec.name NULLS LAST
+`
+
+type MobileExpenseCategoryTotalsRow struct {
+	Name  string
+	Total string
+}
+
+func (q *Queries) MobileExpenseCategoryTotals(ctx context.Context, groupID int64) ([]MobileExpenseCategoryTotalsRow, error) {
+	rows, err := q.db.Query(ctx, mobileExpenseCategoryTotals, groupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MobileExpenseCategoryTotalsRow{}
+	for rows.Next() {
+		var i MobileExpenseCategoryTotalsRow
+		if err := rows.Scan(&i.Name, &i.Total); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const mobileFineBalances = `-- name: MobileFineBalances :many
 SELECT e.contribution_id, e.fine_category_id, sum(r.sign * e.amount)::text AS balance
 FROM ledger_entries e
@@ -296,6 +331,131 @@ func (q *Queries) MobileInvoices(ctx context.Context, arg MobileInvoicesParams) 
 			&i.MemberName,
 			&i.ContributionName,
 			&i.FineCategoryName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const mobileWithdrawalRequests = `-- name: MobileWithdrawalRequests :many
+SELECT r.id, r.kind, r.status, r.amount::text AS amount, r.description, r.recipient, r.decline_reason,
+       r.requested_by, r.membership_id, r.created_at, r.created_by,
+       coalesce(trim(ru.first_name || ' ' || ru.last_name), '')::text AS requested_by_name,
+       coalesce(trim(u.first_name || ' ' || u.last_name), '')::text AS member_name,
+       coalesce(ec.name, '')::text AS expense_category_name, coalesce(c.name, '')::text AS contribution_name,
+       coalesce(a.name, '')::text AS account_name, coalesce(ta.name, '')::text AS to_account_name,
+       coalesce(b.name, '')::text AS recipient_bank_name,
+       (SELECT count(*) FROM withdrawal_approvals x WHERE x.withdrawal_request_id = r.id AND x.decision = 'approved') AS approved,
+       (SELECT count(*) FROM withdrawal_approvals x WHERE x.withdrawal_request_id = r.id AND x.decision = 'declined') AS declined,
+       (SELECT count(*) FROM withdrawal_approvals x WHERE x.withdrawal_request_id = r.id AND x.decision = 'pending') AS pending,
+       coalesce((SELECT x.decision::text FROM withdrawal_approvals x
+                 WHERE x.withdrawal_request_id = r.id AND x.membership_id = $1::bigint LIMIT 1), '')::text AS my_decision
+FROM withdrawal_requests r
+LEFT JOIN memberships rm ON rm.id = r.requested_by
+LEFT JOIN users ru ON ru.id = rm.user_id
+LEFT JOIN memberships m ON m.id = r.membership_id
+LEFT JOIN users u ON u.id = m.user_id
+LEFT JOIN expense_categories ec ON ec.id = r.expense_category_id
+LEFT JOIN contributions c ON c.id = r.contribution_id
+LEFT JOIN group_accounts a ON a.id = r.account_id
+LEFT JOIN group_accounts ta ON ta.id = r.to_account_id
+LEFT JOIN banks b ON b.id = CASE WHEN r.recipient ? 'bank_id' AND jsonb_typeof(r.recipient -> 'bank_id') = 'number'
+                                  THEN (r.recipient ->> 'bank_id')::bigint END
+WHERE r.group_id = $2
+  AND ($3::bigint IS NULL OR r.id = $3)
+  AND (coalesce(cardinality($4::text[]), 0) = 0 OR r.status::text = ANY ($4::text[]))
+  AND (coalesce(cardinality($5::bigint[]), 0) = 0 OR r.requested_by = ANY ($5::bigint[]))
+ORDER BY CASE WHEN $6::text = 'amount_asc' THEN r.amount END ASC,
+         CASE WHEN $6::text = 'amount_desc' THEN r.amount END DESC,
+         CASE WHEN $6::text = 'date_asc' THEN r.created_at END ASC,
+         r.created_at DESC, r.id DESC
+LIMIT $8 OFFSET $7
+`
+
+type MobileWithdrawalRequestsParams struct {
+	Caller    int64
+	GroupID   int64
+	ID        *int64
+	Statuses  []string
+	MemberIds []int64
+	Sort      string
+	Off       int32
+	Lim       int32
+}
+
+type MobileWithdrawalRequestsRow struct {
+	ID                  int64
+	Kind                WithdrawalKind
+	Status              WithdrawalRequestStatus
+	Amount              string
+	Description         string
+	Recipient           []byte
+	DeclineReason       string
+	RequestedBy         *int64
+	MembershipID        *int64
+	CreatedAt           time.Time
+	CreatedBy           *int64
+	RequestedByName     string
+	MemberName          string
+	ExpenseCategoryName string
+	ContributionName    string
+	AccountName         string
+	ToAccountName       string
+	RecipientBankName   string
+	Approved            int64
+	Declined            int64
+	Pending             int64
+	MyDecision          string
+}
+
+// Withdrawal requests for the app, with every signatory's tally and the
+// caller's own answer (” when they aren't a signatory on it).
+func (q *Queries) MobileWithdrawalRequests(ctx context.Context, arg MobileWithdrawalRequestsParams) ([]MobileWithdrawalRequestsRow, error) {
+	rows, err := q.db.Query(ctx, mobileWithdrawalRequests,
+		arg.Caller,
+		arg.GroupID,
+		arg.ID,
+		arg.Statuses,
+		arg.MemberIds,
+		arg.Sort,
+		arg.Off,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MobileWithdrawalRequestsRow{}
+	for rows.Next() {
+		var i MobileWithdrawalRequestsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Kind,
+			&i.Status,
+			&i.Amount,
+			&i.Description,
+			&i.Recipient,
+			&i.DeclineReason,
+			&i.RequestedBy,
+			&i.MembershipID,
+			&i.CreatedAt,
+			&i.CreatedBy,
+			&i.RequestedByName,
+			&i.MemberName,
+			&i.ExpenseCategoryName,
+			&i.ContributionName,
+			&i.AccountName,
+			&i.ToAccountName,
+			&i.RecipientBankName,
+			&i.Approved,
+			&i.Declined,
+			&i.Pending,
+			&i.MyDecision,
 		); err != nil {
 			return nil, err
 		}

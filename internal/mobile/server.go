@@ -114,25 +114,47 @@ func New(pool *pgxpool.Pool, keys *Keys, authSvc *auth.Service, otp OTPSender) *
 		"fines/get_group_fine_options":                               {fn: s.groupAction(6, s.fineOptions)},
 
 		// Milestone 3: recording money from the app.
-		"deposits/record_contribution_payments":      {fn: s.groupAction(6, s.recordDeposits("contribution", "Error contribution payments array empty."))},
-		"deposits/record_fine_payments":              {fn: s.groupAction(6, s.recordDeposits("fine", "Error fine payments array empty."))},
-		"deposits/record_miscellaneous_payments":     {fn: s.groupAction(6, s.recordDeposits("misc", "Error miscellaneous payments array empty."))},
-		"deposits/record_income":                     {fn: s.groupAction(6, s.recordDeposits("income", "Error income payments array empty."))},
-		"deposits/new_record_contribution_payments":  {fn: s.groupAction(6, s.newMemberDeposits("contribution"))},
-		"deposits/new_record_fine_payments":          {fn: s.groupAction(6, s.newMemberDeposits("fine"))},
-		"deposits/new_record_miscellaneous_payments": {fn: s.groupAction(6, s.newDeposit("misc"))},
-		"deposits/new_record_income_payment":         {fn: s.groupAction(6, s.newDeposit("income"))},
-		"deposits/void":                              {fn: s.groupAction(6, s.officialsOnly(s.voidDeposit))},
-		"withdrawals/record_expenses":                {fn: s.groupAction(6, s.officialsOnly(s.recordExpenses))},
-		"withdrawals/new_record_expenses":            {fn: s.groupAction(6, s.officialsOnly(s.newRecordExpense))},
-		"withdrawals/record_contribution_refund":     {fn: s.groupAction(6, s.officialsOnly(s.recordContributionRefund))},
-		"withdrawals/record_funds_transfer":          {fn: s.groupAction(6, s.officialsOnly(s.recordFundsTransfer))},
-		"withdrawals/void":                           {fn: s.groupAction(6, s.officialsOnly(s.voidWithdrawal))},
-		"fines/fine_members":                         {fn: s.groupAction(6, s.officialsOnly(s.fineMembers))},
-		"fines/new_fine_members":                     {fn: s.groupAction(6, s.officialsOnly(s.newFineMembers))},
-		"invoices/create":                            {fn: s.groupAction(6, s.officialsOnly(s.createInvoices))},
-		"invoices/void":                              {fn: s.groupAction(6, s.officialsOnly(s.voidInvoice))},
-		"depositors/create":                          {fn: s.groupAction(6, s.officialsOnly(s.createDepositor))},
+		"deposits/record_contribution_payments":                    {fn: s.groupAction(6, s.recordDeposits("contribution", "Error contribution payments array empty."))},
+		"deposits/record_fine_payments":                            {fn: s.groupAction(6, s.recordDeposits("fine", "Error fine payments array empty."))},
+		"deposits/record_miscellaneous_payments":                   {fn: s.groupAction(6, s.recordDeposits("misc", "Error miscellaneous payments array empty."))},
+		"deposits/record_income":                                   {fn: s.groupAction(6, s.recordDeposits("income", "Error income payments array empty."))},
+		"deposits/new_record_contribution_payments":                {fn: s.groupAction(6, s.newMemberDeposits("contribution"))},
+		"deposits/new_record_fine_payments":                        {fn: s.groupAction(6, s.newMemberDeposits("fine"))},
+		"deposits/new_record_miscellaneous_payments":               {fn: s.groupAction(6, s.newDeposit("misc"))},
+		"deposits/new_record_income_payment":                       {fn: s.groupAction(6, s.newDeposit("income"))},
+		"deposits/void":                                            {fn: s.groupAction(6, s.officialsOnly(s.voidDeposit))},
+		"withdrawals/record_expenses":                              {fn: s.groupAction(6, s.officialsOnly(s.recordExpenses))},
+		"withdrawals/new_record_expenses":                          {fn: s.groupAction(6, s.officialsOnly(s.newRecordExpense))},
+		"withdrawals/record_contribution_refund":                   {fn: s.groupAction(6, s.officialsOnly(s.recordContributionRefund))},
+		"withdrawals/record_funds_transfer":                        {fn: s.groupAction(6, s.officialsOnly(s.recordFundsTransfer))},
+		"withdrawals/void":                                         {fn: s.groupAction(6, s.officialsOnly(s.voidWithdrawal))},
+		"fines/fine_members":                                       {fn: s.groupAction(6, s.officialsOnly(s.fineMembers))},
+		"fines/new_fine_members":                                   {fn: s.groupAction(6, s.officialsOnly(s.newFineMembers))},
+		"invoices/create":                                          {fn: s.groupAction(6, s.officialsOnly(s.createInvoices))},
+		"invoices/void":                                            {fn: s.groupAction(6, s.officialsOnly(s.voidInvoice))},
+		"saccos/get_sacco_options":                                 {fn: s.groupAction(6, s.saccoOptions)},
+		"sacco_branches/get_sacco_branches_options":                {fn: s.groupAction(6, s.saccoBranchOptions)},
+		"mobile_money_providers/get_mobile_money_provider_options": {fn: s.groupAction(6, s.mobileMoneyProviderOptions)},
+		"withdrawals/withdrawal_request_list":                      {fn: s.groupAction(6, s.withdrawalRequestList)},
+		"withdrawals/view_withdrawal_request":                      {fn: s.groupAction(6, s.viewWithdrawalRequest)},
+		"withdrawals/request_funds_transfer":                       {fn: s.groupAction(6, s.officialsOnly(s.requestFundsTransfer))},
+		"withdrawals/respond_to_withdrawal_request":                {fn: s.groupAction(6, s.respondToWithdrawalRequest)},
+		"withdrawals/cancel_withdrawal_request":                    {fn: s.groupAction(6, s.cancelWithdrawalRequest)},
+		"reports/contribution_summary":                             {fn: s.groupAction(6, s.memberSummary(false))},
+		"reports/fines_summary":                                    {fn: s.groupAction(6, s.memberSummary(true))},
+		"reports/expenses_summary":                                 {fn: s.groupAction(6, s.expensesSummary)},
+		"reports/transaction_statement":                            {fn: s.groupAction(6, s.transactionStatement)},
+		"depositors/create":                                        {fn: s.groupAction(6, s.officialsOnly(s.createDepositor))},
+	}
+	for module, kind := range map[string]store.AccountKind{
+		"bank_accounts": store.AccountKindBank, "sacco_accounts": store.AccountKindSacco,
+		"mobile_money_accounts": store.AccountKindMobileMoney, "petty_cash_accounts": store.AccountKindPettyCash,
+	} {
+		s.actions[module+"/create"] = action{fn: s.groupAction(6, s.createAccount(kind))}
+		s.actions[module+"/edit"] = action{fn: s.groupAction(6, s.editAccount(kind))}
+		s.actions[module+"/close"] = action{fn: s.groupAction(6, s.closeAccount(kind, true))}
+		s.actions[module+"/activate"] = action{fn: s.groupAction(6, s.closeAccount(kind, false))}
+		s.actions[module+"/delete"] = action{fn: s.groupAction(6, s.deleteAccount(kind))}
 	}
 	for module, kind := range map[string]string{"income_categories": "income", "expense_categories": "expense", "fine_categories": "fine"} {
 		s.actions[module+"/create"] = action{fn: s.groupAction(6, s.createCategory(kind))}
