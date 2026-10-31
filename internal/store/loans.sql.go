@@ -1468,6 +1468,18 @@ func (q *Queries) LoanTotals(ctx context.Context, groupID int64) (LoanTotalsRow,
 	return i, err
 }
 
+const loanTypeInUse = `-- name: LoanTypeInUse :one
+SELECT (EXISTS (SELECT 1 FROM loans WHERE loan_type_id = $1::bigint AND voided_at IS NULL)
+     OR EXISTS (SELECT 1 FROM loan_applications WHERE loan_type_id = $1::bigint))::bool AS used
+`
+
+func (q *Queries) LoanTypeInUse(ctx context.Context, id int64) (bool, error) {
+	row := q.db.QueryRow(ctx, loanTypeInUse, id)
+	var used bool
+	err := row.Scan(&used)
+	return used, err
+}
+
 const loanTypeNameTaken = `-- name: LoanTypeNameTaken :one
 SELECT EXISTS (
     SELECT 1 FROM loan_types

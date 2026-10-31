@@ -71,8 +71,12 @@ func (s *Server) getMembersAndDetails(ctx context.Context, c *call, g *member) (
 		return nil, err
 	}
 	var totals map[int64]memberTotals
+	var lb *loanBook
 	if full {
 		if totals, err = s.memberTotals(ctx, g, only); err != nil {
+			return nil, err
+		}
+		if lb, err = s.loanBook(ctx, g, nil); err != nil {
 			return nil, err
 		}
 	}
@@ -116,7 +120,7 @@ func (s *Server) getMembersAndDetails(ctx context.Context, c *call, g *member) (
 			t := totals[m.ID]
 			row["total_contributions"] = t.contributions
 			row["total_fines"] = t.fines
-			row["total_loan_balances"] = 0
+			row["total_loan_balances"] = float64(lb.byMember[m.ID]) / 100
 			row["contribution_arrears"] = t.contributionArrears
 			row["total_fine_arrears"] = t.fineArrears
 			row["lump_sum_balance"] = 0
@@ -136,7 +140,7 @@ func (s *Server) getMembersAndDetails(ctx context.Context, c *call, g *member) (
 		details = map[string]any{
 			"total_contributions":    contributions,
 			"total_fines":            fines,
-			"total_loan_balances":    0,
+			"total_loan_balances":    float64(lb.balance) / 100,
 			"total_expense_payments": 0,
 		}
 	}

@@ -334,3 +334,7 @@ JOIN memberships m ON m.id = a.membership_id
 JOIN users u ON u.id = m.user_id
 JOIN loan_types t ON t.id = a.loan_type_id
 WHERE a.group_id = $1 AND a.id = $2;
+
+-- name: LoanTypeInUse :one
+SELECT (EXISTS (SELECT 1 FROM loans WHERE loan_type_id = sqlc.arg(id)::bigint AND voided_at IS NULL)
+     OR EXISTS (SELECT 1 FROM loan_applications WHERE loan_type_id = sqlc.arg(id)::bigint))::bool AS used;

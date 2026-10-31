@@ -238,7 +238,7 @@ func (p *Plan) loanTypes(rows []Row, ref refSets, now time.Time) map[int64]int64
 		late, balance, fee := p.rules("loan_types", r)
 		created := timeOr(epoch(r.Str("created_on")), now)
 		var deleted *time.Time
-		if r.Flag("is_deleted") || r.Str("active") == "0" {
+		if r.Flag("is_deleted") {
 			d := timeOr(epoch(r.Str("modified_on")), created)
 			deleted = &d
 		}
@@ -247,7 +247,7 @@ func (p *Plan) loanTypes(rows []Row, ref refSets, now time.Time) map[int64]int64
 			clampInt(r.Int("grace_period"), 1, 24), basis, amountPtr(r, "minimum_loan_amount"), amountPtr(r, "maximum_loan_amount"),
 			multiple, guar, positiveInt(r, "minimum_guarantors"), positiveInt(r, "maximum_guarantors"),
 			late, balance, fee, r.Flag("enable_loan_fine_deferment"), r.Str("enable_loan_approvals") != "0",
-			r.Flag("is_hidden"), extras(r, loanTypeColumns), p.createdBy(r, ref.users), created,
+			r.Flag("is_hidden") || r.Str("active") == "0", extras(r, loanTypeColumns), p.createdBy(r, ref.users), created,
 			timeOr(epoch(r.Str("modified_on")), created), deleted})
 		ids[id] = gid
 	}
