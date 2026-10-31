@@ -305,9 +305,9 @@ func (s *Server) listSaccos(w http.ResponseWriter, r *http.Request) {
 		writeInternal(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"saccos": mapSlice(rows, func(v store.Sacco) map[string]any {
+	writeJSON(w, http.StatusOK, mapSlice(rows, func(v store.Sacco) map[string]any {
 		return map[string]any{"id": v.ID, "name": v.Name, "slug": v.Slug, "is_active": v.IsActive}
-	})})
+	}))
 }
 
 func (s *Server) listSaccoBranches(w http.ResponseWriter, r *http.Request) {
@@ -321,9 +321,9 @@ func (s *Server) listSaccoBranches(w http.ResponseWriter, r *http.Request) {
 		writeInternal(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"branches": mapSlice(rows, func(v store.SaccoBranch) map[string]any {
+	writeJSON(w, http.StatusOK, mapSlice(rows, func(v store.SaccoBranch) map[string]any {
 		return map[string]any{"id": v.ID, "name": v.Name, "is_active": v.IsActive}
-	})})
+	}))
 }
 
 func (s *Server) listMobileMoneyProviders(w http.ResponseWriter, r *http.Request) {
@@ -332,7 +332,7 @@ func (s *Server) listMobileMoneyProviders(w http.ResponseWriter, r *http.Request
 		writeInternal(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"providers": mapSlice(rows, func(v store.MobileMoneyProvider) map[string]any {
+	writeJSON(w, http.StatusOK, mapSlice(rows, func(v store.MobileMoneyProvider) map[string]any {
 		return map[string]any{"id": v.ID, "name": v.Name, "slug": v.Slug, "is_active": v.IsActive}
-	})})
+	}))
 }
