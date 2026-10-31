@@ -26,6 +26,8 @@ var DumpTables = []string{
 	"deposits", "withdrawals", "account_transfers", "transaction_statements",
 	"withdrawal_requests", "withdrawal_approval_requests",
 	"loan_types", "loans", "loan_invoices", "loan_repayments", "loan_guarantors",
+	"debtors", "bank_loans", "debtor_loan_types", "debtor_loans", "debtor_loan_invoices",
+	"debtor_loan_repayments", "debtor_loan_guarantors",
 }
 
 // Options control how legacy values are mapped.
@@ -50,6 +52,7 @@ type Plan struct {
 	Deposits, Withdrawals, AccountTransfers, AccountEntries          [][]any
 	WithdrawalRequests, WithdrawalApprovals                          [][]any
 	LoanTypes, Loans, LoanCharges, LoanRepayments, LoanGuarantors    [][]any
+	Debtors, BankLoans                                               [][]any
 
 	Report Report
 }
@@ -180,9 +183,12 @@ func Transform(t Tables, roles []Row, opt Options, now time.Time) (*Plan, error)
 	loanSet := p.loans(t["loans"], t["loan_invoices"], ref, accounts, loanTypes, now)
 	p.loanCharges(t["loan_invoices"], ref, loanSet, now)
 	p.loanGuarantors(t["loan_guarantors"], ref, loanSet, now)
-	deposits, repaymentDeposit := p.deposits(t["deposits"], ref, accounts, income, fines, depositors, loanSet, now)
+	p.debtors(t["debtors"], ref, now)
+	p.notImported(t, "debtor_loan_types", "debtor_loans", "debtor_loan_invoices", "debtor_loan_repayments", "debtor_loan_guarantors")
+	bankLoans := p.bankLoans(t["bank_loans"], t["withdrawals"], ref, accounts, now)
+	deposits, repaymentDeposit := p.deposits(t["deposits"], ref, accounts, income, fines, depositors, loanSet, bankLoans, now)
 	p.loanRepayments(t["loan_repayments"], ref, accounts, loanSet, repaymentDeposit, deposits, now)
-	withdrawals := p.withdrawals(t["withdrawals"], ref, accounts, expense, loanSet, now)
+	withdrawals := p.withdrawals(t["withdrawals"], ref, accounts, expense, loanSet, bankLoans, now)
 	transfers := p.accountTransfers(t["account_transfers"], ref, accounts, now)
 	p.accountEntries(t["transaction_statements"], ref, accounts, deposits, withdrawals, transfers, now)
 	requests := p.withdrawalRequests(t["withdrawal_requests"], ref, accounts, expense, now)
@@ -207,6 +213,7 @@ func Transform(t Tables, roles []Row, opt Options, now time.Time) (*Plan, error)
 		"withdrawal_requests": p.WithdrawalRequests, "withdrawal_approvals": p.WithdrawalApprovals,
 		"loan_types": p.LoanTypes, "loans": p.Loans, "loan_charges": p.LoanCharges,
 		"loan_repayments": p.LoanRepayments, "loan_guarantors": p.LoanGuarantors,
+		"debtors": p.Debtors, "bank_loans": p.BankLoans,
 	} {
 		p.Report.Imported[name] = len(rows)
 	}

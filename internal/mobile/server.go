@@ -57,6 +57,7 @@ type call struct {
 	userID  int64 // from the access token; 0 on public actions
 	r       *http.Request
 	version int
+	debtors bool // a debtor_loan_types action: the same handlers, on the types offered to debtors
 }
 
 func New(pool *pgxpool.Pool, keys *Keys, authSvc *auth.Service, otp OTPSender) *Server {
@@ -185,6 +186,29 @@ func New(pool *pgxpool.Pool, keys *Keys, authSvc *auth.Service, otp OTPSender) *
 		"loan_applications/upload_document":                             {fn: s.groupAction(6, s.notAvailable)},
 		"loan_applications/create_amt_loan_application":                 {fn: s.groupAction(6, s.notAvailable)},
 		"loan_applications/approve_ngo_loan_application":                {fn: s.groupAction(6, s.notAvailable)},
+
+		// Bank loans and debtors (milestone 4b).
+		"bank_loans/get_group_bank_loan_options": {fn: s.groupAction(6, s.bankLoanOptions)},
+		"deposits/record_bank_loan":              {fn: s.groupAction(6, s.officialsOnly(s.recordBankLoan))},
+		"deposits/void_bank_loan":                {fn: s.groupAction(6, s.officialsOnly(s.voidBankLoan))},
+		"withdrawals/record_bank_loan_repayment": {fn: s.groupAction(6, s.officialsOnly(s.recordBankLoanRepayment))},
+		"reports/bank_loans_summary":             {fn: s.groupAction(6, s.bankLoansSummary)},
+		"debtors/get_debtors_list":               {fn: s.groupAction(6, s.debtorsList)},
+	}
+	// debtor_loan_types/* are the loan_types actions on the types offered to
+	// debtors (the legacy controllers were copies of each other).
+	var debtorTypes []string
+	for name := range s.actions {
+		if strings.HasPrefix(name, "loan_types/") {
+			debtorTypes = append(debtorTypes, name)
+		}
+	}
+	for _, name := range debtorTypes {
+		fn := s.actions[name].fn
+		s.actions["debtor_"+name] = action{fn: func(ctx context.Context, c *call) (any, error) {
+			c.debtors = true
+			return fn(ctx, c)
+		}}
 	}
 	for module, kind := range map[string]store.AccountKind{
 		"bank_accounts": store.AccountKindBank, "sacco_accounts": store.AccountKindSacco,
@@ -312,6 +336,7 @@ type responder struct {
 	w       http.ResponseWriter
 	keys    *Keys
 	version int
+	debtors bool // a debtor_loan_types action: the same handlers, on the types offered to debtors
 }
 
 // send encrypts resp, wrapped in {"response": ...} for builds up to 77.

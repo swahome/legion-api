@@ -174,7 +174,7 @@ func (s *Server) groupDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 		out["recent"] = moves
 		out["pending_withdrawal_requests"] = pending
-		lt, err := s.q.LoanTotals(ctx, a.Group.ID)
+		lt, err := s.q.LoanTotals(ctx, store.LoanTotalsParams{GroupID: a.Group.ID})
 		if err != nil {
 			writeInternal(w, r, err)
 			return

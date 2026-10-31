@@ -119,6 +119,39 @@ A loan's disbursement withdrawal can't be voided on its own (409
 `loan_disbursement`); void the loan. See `docs/schema/loans.md` for the
 schedule rules and legacy codes.
 
+### Bank loans and debtors (milestone 4b)
+
+| Method | Path | Who | Notes |
+|---|---|---|---|
+| GET | `/bank-loans?status=` | member | Loans the group took, with `repaid`, `balance`, `status` (`active`, `paid`, `voided`) and group `totals`. `status` filter: empty (live), `open`, `paid`, `voided` |
+| GET | `/bank-loans/{id}` | member | `bank_loan` and its `repayments` (each a withdrawal id) |
+| POST | `/bank-loans` | official | `description`, `amount` (received), `total_payable` (defaults to the amount), optional `balance` (what is still owed, for a loan taken before it was entered here), `starts_on`, `ends_on`, `account_id`, optional `method`. Writes a `bank_loan` deposit into the account |
+| PATCH | `/bank-loans/{id}` | official | `description`, `total_payable`, `balance`, `ends_on`. The amount, start date and account belong to the deposit: void and record again to change them |
+| POST | `/bank-loans/{id}/void` | official | Voids the loan, its deposit and its repayments. 409 `already_voided` |
+| POST | `/bank-loans/{id}/repayments` | official | `account_id`, `amount`, `paid_on`, optional `method`, `description`. Writes a `bank_loan_repayment` withdrawal |
+| POST | `/bank-loans/{id}/repayments/{wid}/void` | official | Voids that withdrawal |
+| GET | `/debtors?include_inactive=` | official | People outside the group who borrow from it, with `loans`, `lent` and `balance` |
+| GET, PATCH, DELETE | `/debtors/{id}` | official | PATCH takes `name`, `phone`, `email`, `id_number`, `description`. DELETE only when the debtor has no live loans (409 `debtor_has_loans`) |
+| POST | `/debtors` | official | As PATCH; `name` is required |
+| POST | `/debtors/{id}/suspend`, `/activate` | official | A suspended debtor keeps their loans but can't be lent to |
+
+A bank loan's deposit can't be voided on its own (409 `bank_loan_deposit`).
+Its balance is `opening_balance` (the `balance` given, or the total payable)
+less the live repayments.
+
+**Loans to debtors** use the loan routes above. A loan type with
+`for_debtors: true` (set when it is created; PATCH keeps it) is offered to
+debtors only: `GET /loan-types?for=debtors` lists them, members never see them
+or apply with them, and they can't be based on savings. `POST /loans` takes
+`debtor_id` instead of `member_id`; the disbursement is an
+`external_loan_disbursement` withdrawal, the fee an
+`external_lending_processing_income` deposit and repayments
+`external_lending_repayment` deposits. `POST /loans/preview` takes
+`for_debtors: true` before a debtor is picked. Loans carry `member` or
+`debtor`. `GET /loans` lists member loans only; officials add
+`borrower=debtors` or `debtor_id` for debtor loans (with their own totals).
+Fines, statements, voids and repayments work as for member loans.
+
 ### Dashboard
 
 `GET /dashboard` returns, as of today in the server's time zone (`as_of`):

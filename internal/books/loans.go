@@ -73,6 +73,7 @@ type LoanType struct {
 	FineDeferment   bool
 	NeedsApproval   bool
 	IsHidden        bool
+	ForDebtors      bool // offered to debtors (people outside the group), not members; set when created
 }
 
 // LoanTypeFrom reads a stored loan type back into the editable form.
@@ -83,7 +84,7 @@ func LoanTypeFrom(t store.LoanType) (LoanType, error) {
 		FixedRate: numFloat(t.FixedInterestRate), Frequency: string(t.Frequency), FixedTerm: t.FixedTerm,
 		MinTerm: t.MinTerm, MaxTerm: t.MaxTerm, GracePeriods: t.GracePeriods, AmountBasis: t.AmountBasis,
 		Guarantors: t.Guarantors, MinGuarantors: t.MinGuarantors, MaxGuarantors: t.MaxGuarantors,
-		FineDeferment: t.FineDeferment, NeedsApproval: t.NeedsApproval, IsHidden: t.IsHidden,
+		FineDeferment: t.FineDeferment, NeedsApproval: t.NeedsApproval, IsHidden: t.IsHidden, ForDebtors: t.ForDebtors,
 	}
 	opt := func(n pgtype.Numeric) *string {
 		if !n.Valid {
@@ -177,6 +178,9 @@ func (t *LoanType) Check() error {
 			return Error{"invalid_amount_range", "min_amount is more than max_amount."}
 		}
 	case "savings":
+		if t.ForDebtors {
+			return Error{"invalid_amount_basis", "A debtor has no savings in the group: give an amount range instead."}
+		}
 		if t.SavingsMultiple == nil || Cents(*t.SavingsMultiple) <= 0 {
 			return Error{"invalid_savings_multiple", "A loan based on savings needs savings_multiple, such as 3 for three times the member's savings."}
 		}
@@ -246,6 +250,7 @@ func SaveLoanType(ctx context.Context, q *store.Queries, groupID, userID, id int
 			MinGuarantors: t.MinGuarantors, MaxGuarantors: t.MaxGuarantors, LateFine: loans.Encode(t.LateFine),
 			BalanceFine: loans.Encode(t.BalanceFine), ProcessingFee: loans.Encode(t.ProcessingFee),
 			FineDeferment: t.FineDeferment, NeedsApproval: t.NeedsApproval, IsHidden: t.IsHidden, CreatedBy: &userID,
+			ForDebtors:   t.ForDebtors,
 			InterestRate: rate(t.InterestRate), FixedInterest: numeric(t.FixedInterest), FixedInterestRate: rate(t.FixedRate),
 			MinAmount: numericOrNull(t.MinAmount), MaxAmount: numericOrNull(t.MaxAmount),
 			SavingsMultiple: numericOrNull(t.SavingsMultiple),
@@ -278,7 +283,9 @@ type Guarantor struct {
 // terms come from the type; Installments must then fit the type's term and
 // the amount its limits. Without one every term is given here.
 type NewLoan struct {
-	MemberID     int64
+	MemberID     int64 // the borrower: a member...
+	DebtorID     int64 // ...or a debtor (someone outside the group), never both
+	ForDebtors   bool  // previewing a debtor loan before the debtor is picked
 	LoanTypeID   *int64
 	AccountID    int64
 	Method       *string
@@ -320,6 +327,12 @@ func (n *NewLoan) resolve(ctx context.Context, q *store.Queries, groupID int64) 
 		t, err := LoanTypeFrom(lt)
 		if err != nil {
 			return loans.Terms{}, err
+		}
+		if t.ForDebtors != (n.DebtorID != 0 || n.ForDebtors) {
+			if t.ForDebtors {
+				return loans.Terms{}, Error{"invalid_loan_type", t.Name + " is a loan type for debtors, not members."}
+			}
+			return loans.Terms{}, Error{"invalid_loan_type", t.Name + " is a loan type for members, not debtors."}
 		}
 		if err := n.fitType(ctx, q, groupID, t); err != nil {
 			return loans.Terms{}, err
@@ -456,8 +469,7 @@ func RecordLoan(ctx context.Context, q *store.Queries, groupID, userID int64, n 
 	if err := CheckAmountDate(n.Amount, n.Date, n.Method, "loan"); err != nil {
 		return 0, err
 	}
-	if err := Found("invalid_member", "That member is not in this group.")(
-		q.ActiveMembershipInGroup(ctx, store.ActiveMembershipInGroupParams{GroupID: groupID, ID: n.MemberID})); err != nil {
+	if err := n.checkBorrower(ctx, q, groupID); err != nil {
 		return 0, err
 	}
 	if err := checkGuarantors(ctx, q, groupID, n.MemberID, n.Guarantors); err != nil {
@@ -481,8 +493,9 @@ func RecordLoan(ctx context.Context, q *store.Queries, groupID, userID int64, n 
 		d := ends.AddDate(0, 0, 1)
 		nextBalanceFine = &d
 	}
+	member, debtor := n.borrower()
 	loanID, err := q.CreateLoan(ctx, store.CreateLoanParams{
-		GroupID: groupID, MembershipID: n.MemberID, LoanTypeID: n.LoanTypeID, DisbursedOn: *n.Date, AccountID: &acct.ID,
+		GroupID: groupID, MembershipID: member, DebtorID: debtor, LoanTypeID: n.LoanTypeID, DisbursedOn: *n.Date, AccountID: &acct.ID,
 		InterestType: store.InterestType(n.InterestType), RatePer: store.InterestRatePer(n.RatePer),
 		ReducingMethod: n.ReducingMethod, Frequency: store.RepaymentFrequency(n.Frequency),
 		Installments: int32(n.Installments), GracePeriods: int32(n.GracePeriods), FirstDueOn: n.FirstDueOn, EndsOn: ends,
@@ -498,8 +511,12 @@ func RecordLoan(ctx context.Context, q *store.Queries, groupID, userID int64, n 
 	if desc == "" {
 		desc = "Loan disbursement"
 	}
-	wid, err := WriteWithdrawal(ctx, q, acct, Withdrawal{Kind: store.WithdrawalKindLoanDisbursement, Amount: n.Amount,
-		MemberID: &n.MemberID}, n.Method, *n.Date, desc, userID)
+	out, feeKind := store.WithdrawalKindLoanDisbursement, store.DepositKindLoanProcessingIncome
+	if debtor != nil {
+		out, feeKind = store.WithdrawalKindExternalLoanDisbursement, store.DepositKindExternalLendingProcessingIncome
+	}
+	wid, err := WriteWithdrawal(ctx, q, acct, Withdrawal{Kind: out, Amount: n.Amount, MemberID: member},
+		n.Method, *n.Date, desc, userID)
 	if err != nil {
 		return 0, err
 	}
@@ -520,8 +537,8 @@ func RecordLoan(ctx context.Context, q *store.Queries, groupID, userID int64, n 
 	}
 	if n.ProcessingFee != nil && !n.SkipProcessingFee {
 		if fee := n.ProcessingFee.Charge(terms.Amount, loans.Interest(schedule)); fee > 0 {
-			did, err := writeDeposit(ctx, q, acct, store.DepositKindLoanProcessingIncome, n.Method, loans.Money(fee),
-				*n.Date, "Loan processing fee", &n.MemberID, userID)
+			did, err := writeDeposit(ctx, q, acct, feeKind, n.Method, loans.Money(fee),
+				*n.Date, "Loan processing fee", member, userID)
 			if err != nil {
 				return 0, err
 			}
@@ -539,6 +556,31 @@ func RecordLoan(ctx context.Context, q *store.Queries, groupID, userID int64, n 
 		}
 	}
 	return loanID, nil
+}
+
+// Is reports whether an optional id is id.
+func Is(p *int64, id int64) bool { return p != nil && *p == id }
+
+// borrower is the loan's membership_id and debtor_id; one is nil.
+func (n *NewLoan) borrower() (member, debtor *int64) {
+	if n.DebtorID != 0 {
+		return nil, &n.DebtorID
+	}
+	return &n.MemberID, nil
+}
+
+// checkBorrower checks the loan goes to one active member or one active
+// debtor of the group.
+func (n *NewLoan) checkBorrower(ctx context.Context, q *store.Queries, groupID int64) error {
+	switch {
+	case (n.MemberID == 0) == (n.DebtorID == 0):
+		return Error{"missing_fields", "A loan goes to a member (member_id) or a debtor (debtor_id)."}
+	case n.DebtorID != 0:
+		return Found("invalid_debtor", "That debtor is not active in this group.")(
+			q.ActiveDebtorInGroup(ctx, store.ActiveDebtorInGroupParams{GroupID: groupID, ID: n.DebtorID}))
+	}
+	return Found("invalid_member", "That member is not in this group.")(
+		q.ActiveMembershipInGroup(ctx, store.ActiveMembershipInGroupParams{GroupID: groupID, ID: n.MemberID}))
 }
 
 // writeDeposit writes a deposit and its cash book entry with no ledger row.
@@ -604,7 +646,11 @@ func RecordRepayment(ctx context.Context, q *store.Queries, groupID, userID, loa
 		return 0, err
 	}
 	desc := strings.TrimSpace(r.Description)
-	did, err := writeDeposit(ctx, q, acct, store.DepositKindLoanRepayment, r.Method, r.Amount, *r.Date, desc, &l.MembershipID, userID)
+	kind := store.DepositKindLoanRepayment
+	if l.DebtorID != nil {
+		kind = store.DepositKindExternalLendingRepayment
+	}
+	did, err := writeDeposit(ctx, q, acct, kind, r.Method, r.Amount, *r.Date, desc, l.MembershipID, userID)
 	if err != nil {
 		return 0, err
 	}
@@ -612,7 +658,7 @@ func RecordRepayment(ctx context.Context, q *store.Queries, groupID, userID, loa
 		return 0, err
 	}
 	p := store.CreateLoanRepaymentParams{
-		GroupID: groupID, LoanID: loanID, MembershipID: &l.MembershipID, DepositID: &did, AccountID: &acct.ID,
+		GroupID: groupID, LoanID: loanID, MembershipID: l.MembershipID, DepositID: &did, AccountID: &acct.ID,
 		PaidOn: *r.Date, Source: "deposit", Description: desc, CreatedBy: &userID, Amount: numeric(r.Amount),
 	}
 	if r.Method != nil {

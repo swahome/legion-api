@@ -88,7 +88,7 @@ func (s *Server) groupLoansList(ctx context.Context, c *call, g *member) (any, e
 			"description": "Loan disbursed to " + r.MemberName + " on " + mobileShortTime(r.DisbursedOn) + " at " +
 				loanInterestText(r.InterestRate, r.RatePer, r.InterestType) + " payable in " + strconv.Itoa(int(r.Installments)) +
 				" months. Disbursed from " + from,
-			"member_id": fmt.Sprint(r.MembershipID), "amount": books.Format(r.Amount),
+			"member_id": fmt.Sprint(deref64(r.MembershipID)), "amount": books.Format(r.Amount),
 			"disbursement_date": mobileShortTime(r.DisbursedOn), "end_date": mobileShortTime(r.EndsOn),
 			"is_fully_paid": boolInt(books.Cents(r.Balance) <= 0),
 		})
@@ -130,7 +130,7 @@ func (s *Server) groupLoan(ctx context.Context, c *call, g *member) (any, error)
 		typeName = "Normal Loan"
 	}
 	row := merge(lateFineFields(late), balanceFineFields(bal), feeFields(fee), map[string]any{
-		"id": fmt.Sprint(l.ID), "member_id": fmt.Sprint(l.MembershipID), "group_id": fmt.Sprint(l.GroupID),
+		"id": fmt.Sprint(l.ID), "member_id": fmt.Sprint(deref64(l.MembershipID)), "group_id": fmt.Sprint(l.GroupID),
 		"loan_type_id": idString(l.LoanTypeID), "loan_type": "1", "disbursement_date": fmt.Sprint(g.epoch(l.DisbursedOn)),
 		"loan_end_date": fmt.Sprint(g.epoch(l.EndsOn)), "loan_amount": books.Format(books.NumText(l.Amount)),
 		"account_id": acct, "repayment_period": fmt.Sprint(l.Installments), "interest_rate": books.Format(books.NumText(l.InterestRate)),
@@ -171,7 +171,7 @@ func (s *Server) loanOptions(everyone bool) groupFn {
 			o := map[string]any{"id": fmt.Sprint(r.ID), "name": loanTypeName(r), "amount": books.Format(r.Amount),
 				"description": "Disbursed on " + fullReportTime(r.DisbursedOn), "balance": amount(r.Balance)}
 			if everyone {
-				o["member_id"], o["is_selected"] = fmt.Sprint(r.MembershipID), boolInt(r.MembershipID == g.m.ID)
+				o["member_id"], o["is_selected"] = fmt.Sprint(deref64(r.MembershipID)), boolInt(books.Is(r.MembershipID, g.m.ID))
 			}
 			out = append(out, o)
 		}
@@ -187,17 +187,16 @@ func (s *Server) loanStatement(ctx context.Context, c *call, g *member) (any, er
 	if id != nil {
 		d, err = books.GetLoanDetail(ctx, s.q, g.group.ID, *id, s.today(g))
 	}
-	if id == nil || errors.Is(err, books.ErrNotFound) || (err == nil && d.Loan.VoidedAt != nil) {
+	if id == nil || errors.Is(err, books.ErrNotFound) || (err == nil && (d.Loan.VoidedAt != nil || d.Loan.MembershipID == nil)) {
 		return timed(status(0, "Could not find group member loan details"), s.now()), nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	if d.Loan.MembershipID != g.m.ID && !g.official() && g.flag("enable_member_information_privacy") {
+	if !books.Is(d.Loan.MembershipID, g.m.ID) && !g.official() && g.flag("enable_member_information_privacy") {
 		return timed(status(0, "Could not find group member loan details"), s.now()), nil
 	}
-	mid := d.Loan.MembershipID
-	ms, err := s.q.MobileGroupMembers(ctx, store.MobileGroupMembersParams{GroupID: g.group.ID, MembershipID: &mid, Lim: 1})
+	ms, err := s.q.MobileGroupMembers(ctx, store.MobileGroupMembersParams{GroupID: g.group.ID, MembershipID: d.Loan.MembershipID, Lim: 1})
 	if err != nil {
 		return nil, err
 	}
@@ -514,7 +513,7 @@ func (s *Server) recordLoanRepayments(ctx context.Context, c *call, g *member) (
 			if err != nil {
 				return err
 			}
-			if l.MembershipID != x.member {
+			if !books.Is(l.MembershipID, x.member) {
 				return books.Error{Code: "invalid_loan", Msg: "That loan is not the member's."}
 			}
 			if _, err := books.RecordRepayment(ctx, q, g.group.ID, g.user.ID, x.loan, x.r); err != nil {
@@ -554,7 +553,7 @@ func (s *Server) loanBook(ctx context.Context, g *member, who *int64) (*loanBook
 		b.repaid += books.Cents(r.Paid)
 		if bal := books.Cents(r.Balance); bal > 0 {
 			b.balance += bal
-			b.byMember[r.MembershipID] += bal
+			b.byMember[deref64(r.MembershipID)] += bal
 		}
 	}
 	return b, nil
@@ -615,7 +614,7 @@ func (s *Server) memberLoansSummary(ctx context.Context, c *call, g *member) (an
 	var lent, nextAmount int64
 	var nextDate *time.Time
 	for _, r := range group.rows {
-		if r.MembershipID != g.m.ID || books.Cents(r.Balance) <= 0 {
+		if !books.Is(r.MembershipID, g.m.ID) || books.Cents(r.Balance) <= 0 {
 			continue
 		}
 		lent += books.Cents(r.Amount)

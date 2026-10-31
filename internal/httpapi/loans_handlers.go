@@ -49,6 +49,7 @@ type loanTypeBody struct {
 	FineDeferment   bool                 `json:"fine_deferment"`
 	NeedsApproval   *bool                `json:"needs_approval"`
 	IsHidden        bool                 `json:"is_hidden"`
+	ForDebtors      bool                 `json:"for_debtors"` // set when created
 }
 
 func amountStr(a *Amount) *string {
@@ -67,7 +68,7 @@ func (b loanTypeBody) toBooks() books.LoanType {
 		MinAmount: amountStr(b.MinAmount), MaxAmount: amountStr(b.MaxAmount), SavingsMultiple: amountStr(b.SavingsMultiple),
 		Guarantors: b.Guarantors, MinGuarantors: b.MinGuarantors, MaxGuarantors: b.MaxGuarantors,
 		LateFine: b.LateFine, BalanceFine: b.BalanceFine, ProcessingFee: b.ProcessingFee,
-		FineDeferment: b.FineDeferment, NeedsApproval: true, IsHidden: b.IsHidden,
+		FineDeferment: b.FineDeferment, NeedsApproval: true, IsHidden: b.IsHidden, ForDebtors: b.ForDebtors,
 	}
 	if b.FixedInterest != nil {
 		t.FixedInterest = string(*b.FixedInterest)
@@ -106,18 +107,20 @@ func toLoanType(t store.LoanType) (loanTypeResponse, error) {
 			MinAmount: opt(lt.MinAmount), MaxAmount: opt(lt.MaxAmount), SavingsMultiple: opt(lt.SavingsMultiple),
 			Guarantors: lt.Guarantors, MinGuarantors: lt.MinGuarantors, MaxGuarantors: lt.MaxGuarantors,
 			LateFine: lt.LateFine, BalanceFine: lt.BalanceFine, ProcessingFee: lt.ProcessingFee,
-			FineDeferment: lt.FineDeferment, IsHidden: lt.IsHidden,
+			FineDeferment: lt.FineDeferment, IsHidden: lt.IsHidden, ForDebtors: lt.ForDebtors,
 		},
 		FixedInterest: lt.FixedInterest, NeedsApproval: lt.NeedsApproval,
 	}, nil
 }
 
 // listLoanTypes lists the group's loan types. Members see those on offer;
-// officials can add ?include_hidden=true.
+// officials can add ?include_hidden=true, and ?for=debtors for the types
+// offered to debtors.
 func (s *Server) listLoanTypes(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	rows, err := s.q.ListLoanTypes(r.Context(), store.ListLoanTypesParams{
 		GroupID: a.Group.ID, IncludeHidden: a.IsOfficial && r.URL.Query().Get("include_hidden") == "true",
+		ForDebtors: a.IsOfficial && r.URL.Query().Get("for") == "debtors",
 	})
 	if err != nil {
 		writeInternal(w, r, err)
@@ -138,23 +141,29 @@ func (s *Server) listLoanTypes(w http.ResponseWriter, r *http.Request) {
 func (s *Server) saveLoanType(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	var id int64
+	var forDebtors bool
 	if r.Method == http.MethodPatch {
 		var ok bool
 		if id, ok = pathID(r, "loanTypeID"); !ok {
 			writeError(w, http.StatusNotFound, "loan_type_not_found", "Loan type not found.")
 			return
 		}
-		if _, err := s.q.GetLoanType(r.Context(), store.GetLoanTypeParams{GroupID: a.Group.ID, ID: id}); errors.Is(err, pgx.ErrNoRows) {
+		cur, err := s.q.GetLoanType(r.Context(), store.GetLoanTypeParams{GroupID: a.Group.ID, ID: id})
+		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "loan_type_not_found", "Loan type not found.")
 			return
 		} else if err != nil {
 			writeInternal(w, r, err)
 			return
 		}
+		forDebtors = cur.ForDebtors
 	}
 	var body loanTypeBody
 	if !decodeJSON(w, r, &body) {
 		return
+	}
+	if r.Method == http.MethodPatch {
+		body.ForDebtors = forDebtors // a type stays with members or debtors
 	}
 	userID := claimsFrom(r.Context()).UserID
 	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) (err error) {
@@ -206,7 +215,8 @@ func (s *Server) deleteLoanType(w http.ResponseWriter, r *http.Request) {
 
 type loanSummary struct {
 	ID           int64      `json:"id"`
-	Member       namedRef   `json:"member"`
+	Member       *namedRef  `json:"member"` // the borrower: a member...
+	Debtor       *namedRef  `json:"debtor"` // ...or a debtor
 	LoanType     *namedRef  `json:"loan_type"`
 	Amount       string     `json:"amount"`
 	DisbursedOn  Date       `json:"disbursed_on"`
@@ -242,9 +252,18 @@ func summaryStatus(voided bool, badDebt bool, balance, overdue int64) string {
 	return loans.StatusActive
 }
 
+// borrowerRef names a loan's member or debtor; nil for the other one.
+func borrowerRef(id *int64, name string) *namedRef {
+	if id == nil {
+		return nil
+	}
+	return &namedRef{ID: *id, Name: name}
+}
+
 // listLoans pages through loans, newest first. Members see only their own.
 // Filters: member_id, loan_type_id, status (open, paid, voided; default
-// every live loan).
+// every live loan). Officials list loans to debtors with borrower=debtors,
+// or debtor_id.
 func (s *Server) listLoans(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	pg := pageParams(r)
@@ -256,10 +275,12 @@ func (s *Server) listLoans(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_filter", "status must be open, paid or voided.")
 		return
 	}
-	var ok1, ok2 bool
+	var ok1, ok2, ok3 bool
 	p.MembershipID, ok1 = optionalID(r, "member_id")
 	p.LoanTypeID, ok2 = optionalID(r, "loan_type_id")
-	if !ok1 || !ok2 {
+	p.DebtorID, ok3 = optionalID(r, "debtor_id")
+	p.Debtors = a.IsOfficial && (r.URL.Query().Get("borrower") == "debtors" || p.DebtorID != nil)
+	if !ok1 || !ok2 || !ok3 {
 		writeError(w, http.StatusBadRequest, "invalid_filter", "Filters must be ids.")
 		return
 	}
@@ -280,7 +301,8 @@ func (s *Server) listLoans(w http.ResponseWriter, r *http.Request) {
 	for _, l := range rows {
 		bal, over := books.Cents(l.Balance), books.Cents(l.Overdue)
 		item := loanSummary{
-			ID: l.ID, Member: namedRef{ID: l.MembershipID, Name: l.MemberName}, Amount: money(l.Amount),
+			ID: l.ID, Member: borrowerRef(l.MembershipID, l.MemberName), Debtor: borrowerRef(l.DebtorID, l.MemberName),
+			Amount:      money(l.Amount),
 			DisbursedOn: Date{l.DisbursedOn}, EndsOn: Date{l.EndsOn}, InterestType: string(l.InterestType),
 			InterestRate: l.InterestRate, RatePer: string(l.RatePer), Frequency: string(l.Frequency),
 			Installments: l.Installments, Payable: money(l.Payable), Interest: money(l.Interest), Fines: money(l.Fines),
@@ -294,7 +316,7 @@ func (s *Server) listLoans(w http.ResponseWriter, r *http.Request) {
 		items = append(items, item)
 		total = l.Total
 	}
-	totals, err := s.q.LoanTotals(r.Context(), a.Group.ID)
+	totals, err := s.q.LoanTotals(r.Context(), store.LoanTotalsParams{GroupID: a.Group.ID, Debtors: p.Debtors})
 	if err != nil {
 		writeInternal(w, r, err)
 		return
@@ -394,8 +416,9 @@ func loanDetailJSON(d *books.LoanDetail) map[string]any {
 	balanceFine, _ := loans.DecodeFine(l.BalanceFine)
 	fee, _ := loans.DecodeFee(l.ProcessingFee)
 	out := map[string]any{
-		"id": l.ID, "member": namedRef{ID: l.MembershipID, Name: l.MemberName}, "loan_type": nil,
-		"amount": money(books.NumText(l.Amount)), "disbursed_on": Date{l.DisbursedOn}, "ends_on": Date{l.EndsOn},
+		"id": l.ID, "member": borrowerRef(l.MembershipID, l.MemberName), "debtor": borrowerRef(l.DebtorID, l.MemberName),
+		"loan_type": nil,
+		"amount":    money(books.NumText(l.Amount)), "disbursed_on": Date{l.DisbursedOn}, "ends_on": Date{l.EndsOn},
 		"account": nil, "interest_type": l.InterestType, "interest_rate": books.NumText(l.InterestRate),
 		"rate_per": l.RatePer, "reducing_method": l.ReducingMethod, "fixed_interest": money(books.NumText(l.FixedInterest)),
 		"fixed_interest_rate": books.NumText(l.FixedInterestRate), "frequency": l.Frequency,
@@ -435,7 +458,7 @@ func (s *Server) getLoan(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) writeLoan(w http.ResponseWriter, r *http.Request, a groupAccess, id int64, status int) {
 	d, err := books.GetLoanDetail(r.Context(), s.q, a.Group.ID, id, s.today())
-	if errors.Is(err, books.ErrNotFound) || (err == nil && !a.IsOfficial && (a.MembershipID == nil || *a.MembershipID != d.Loan.MembershipID)) {
+	if errors.Is(err, books.ErrNotFound) || (err == nil && !a.IsOfficial && (a.MembershipID == nil || !books.Is(d.Loan.MembershipID, *a.MembershipID))) {
 		writeError(w, http.StatusNotFound, "loan_not_found", "Loan not found.")
 		return
 	}
@@ -454,6 +477,8 @@ type guarantorBody struct {
 
 type loanBody struct {
 	MemberID          int64                `json:"member_id"`
+	DebtorID          int64                `json:"debtor_id"`   // a loan to a debtor instead of a member
+	ForDebtors        bool                 `json:"for_debtors"` // preview: a debtor loan, before the debtor is picked
 	LoanTypeID        *int64               `json:"loan_type_id"`
 	AccountID         int64                `json:"account_id"`
 	Method            *string              `json:"method"`
@@ -480,7 +505,7 @@ type loanBody struct {
 
 func (b loanBody) toBooks() books.NewLoan {
 	n := books.NewLoan{
-		MemberID: b.MemberID, LoanTypeID: b.LoanTypeID, AccountID: b.AccountID, Method: b.Method,
+		MemberID: b.MemberID, DebtorID: b.DebtorID, ForDebtors: b.ForDebtors, LoanTypeID: b.LoanTypeID, AccountID: b.AccountID, Method: b.Method,
 		Installments: b.Installments, Description: b.Description, InterestType: b.InterestType,
 		InterestRate: b.InterestRate, RatePer: b.RatePer, ReducingMethod: b.ReducingMethod, FixedRate: b.FixedRate,
 		Frequency: b.Frequency, GracePeriods: b.GracePeriods, LateFine: b.LateFine, BalanceFine: b.BalanceFine,
@@ -537,7 +562,7 @@ func (s *Server) previewLoan(w http.ResponseWriter, r *http.Request) {
 		t := s.today()
 		n.Date = &t
 	}
-	if n.MemberID == 0 && a.MembershipID != nil {
+	if n.MemberID == 0 && n.DebtorID == 0 && !n.ForDebtors && a.MembershipID != nil {
 		n.MemberID = *a.MembershipID
 	}
 	terms, fee, err := books.PreviewLoan(r.Context(), s.q, a.Group.ID, n)

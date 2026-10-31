@@ -211,19 +211,20 @@ func (q *Queries) CreateApplicationGuarantor(ctx context.Context, arg CreateAppl
 
 const createLoan = `-- name: CreateLoan :one
 
-INSERT INTO loans (group_id, membership_id, loan_type_id, amount, disbursed_on, account_id, interest_type,
+INSERT INTO loans (group_id, membership_id, debtor_id, loan_type_id, amount, disbursed_on, account_id, interest_type,
                    interest_rate, rate_per, reducing_method, fixed_interest, fixed_interest_rate, frequency,
                    installments, grace_periods, first_due_on, ends_on, late_fine, balance_fine, processing_fee,
                    fine_deferment, next_balance_fine_on, description, created_by)
-VALUES ($1, $2, $3, $21::numeric, $4, $5, $6, $22::numeric, $7, $8,
-        $23::numeric, $24::numeric, $9, $10, $11, $12, $13,
-        $14, $15, $16, $17, $18, $19, $20)
+VALUES ($1, $2, $3, $4, $22::numeric, $5, $6, $7, $23::numeric, $8, $9,
+        $24::numeric, $25::numeric, $10, $11, $12, $13, $14,
+        $15, $16, $17, $18, $19, $20, $21)
 RETURNING id
 `
 
 type CreateLoanParams struct {
 	GroupID           int64
-	MembershipID      int64
+	MembershipID      *int64
+	DebtorID          *int64
 	LoanTypeID        *int64
 	DisbursedOn       time.Time
 	AccountID         *int64
@@ -253,6 +254,7 @@ func (q *Queries) CreateLoan(ctx context.Context, arg CreateLoanParams) (int64, 
 	row := q.db.QueryRow(ctx, createLoan,
 		arg.GroupID,
 		arg.MembershipID,
+		arg.DebtorID,
 		arg.LoanTypeID,
 		arg.DisbursedOn,
 		arg.AccountID,
@@ -430,11 +432,12 @@ const createLoanType = `-- name: CreateLoanType :one
 INSERT INTO loan_types (group_id, name, interest_type, interest_rate, rate_per, reducing_method, fixed_interest,
                         fixed_interest_rate, frequency, fixed_term, min_term, max_term, grace_periods, amount_basis,
                         min_amount, max_amount, savings_multiple, guarantors, min_guarantors, max_guarantors,
-                        late_fine, balance_fine, processing_fee, fine_deferment, needs_approval, is_hidden, created_by)
-VALUES ($1, $2, $3, $22::numeric, $4, $5, $23::numeric,
-        $24::numeric, $6, $7, $8, $9, $10, $11,
-        $25::numeric, $26::numeric, $27::numeric,
-        $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+                        late_fine, balance_fine, processing_fee, fine_deferment, needs_approval, is_hidden, created_by,
+                        for_debtors)
+VALUES ($1, $2, $3, $23::numeric, $4, $5, $24::numeric,
+        $25::numeric, $6, $7, $8, $9, $10, $11,
+        $26::numeric, $27::numeric, $28::numeric,
+        $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
 RETURNING id
 `
 
@@ -460,6 +463,7 @@ type CreateLoanTypeParams struct {
 	NeedsApproval     bool
 	IsHidden          bool
 	CreatedBy         *int64
+	ForDebtors        bool
 	InterestRate      pgtype.Numeric
 	FixedInterest     pgtype.Numeric
 	FixedInterestRate pgtype.Numeric
@@ -491,6 +495,7 @@ func (q *Queries) CreateLoanType(ctx context.Context, arg CreateLoanTypeParams) 
 		arg.NeedsApproval,
 		arg.IsHidden,
 		arg.CreatedBy,
+		arg.ForDebtors,
 		arg.InterestRate,
 		arg.FixedInterest,
 		arg.FixedInterestRate,
@@ -696,7 +701,7 @@ func (q *Queries) GetLoanApplicationForUpdate(ctx context.Context, arg GetLoanAp
 }
 
 const getLoanForUpdate = `-- name: GetLoanForUpdate :one
-SELECT id, group_id, membership_id, loan_type_id, amount, disbursed_on, account_id, interest_type, interest_rate, rate_per, reducing_method, fixed_interest, fixed_interest_rate, frequency, installments, grace_periods, first_due_on, ends_on, late_fine, balance_fine, processing_fee, fine_deferment, next_balance_fine_on, is_bad_debt, description, settings, is_backdated, created_by, created_at, updated_at, voided_at, voided_by FROM loans WHERE group_id = $1 AND id = $2 FOR UPDATE
+SELECT id, group_id, membership_id, loan_type_id, amount, disbursed_on, account_id, interest_type, interest_rate, rate_per, reducing_method, fixed_interest, fixed_interest_rate, frequency, installments, grace_periods, first_due_on, ends_on, late_fine, balance_fine, processing_fee, fine_deferment, next_balance_fine_on, is_bad_debt, description, settings, is_backdated, created_by, created_at, updated_at, voided_at, voided_by, debtor_id FROM loans WHERE group_id = $1 AND id = $2 FOR UPDATE
 `
 
 type GetLoanForUpdateParams struct {
@@ -740,6 +745,7 @@ func (q *Queries) GetLoanForUpdate(ctx context.Context, arg GetLoanForUpdatePara
 		&i.UpdatedAt,
 		&i.VoidedAt,
 		&i.VoidedBy,
+		&i.DebtorID,
 	)
 	return i, err
 }
@@ -779,7 +785,7 @@ func (q *Queries) GetLoanRepayment(ctx context.Context, arg GetLoanRepaymentPara
 }
 
 const getLoanType = `-- name: GetLoanType :one
-SELECT id, group_id, name, interest_type, interest_rate, rate_per, reducing_method, fixed_interest, fixed_interest_rate, frequency, fixed_term, min_term, max_term, grace_periods, amount_basis, min_amount, max_amount, savings_multiple, guarantors, min_guarantors, max_guarantors, late_fine, balance_fine, processing_fee, fine_deferment, needs_approval, is_hidden, settings, created_by, created_at, updated_at, deleted_at FROM loan_types WHERE group_id = $1 AND id = $2 AND deleted_at IS NULL
+SELECT id, group_id, name, interest_type, interest_rate, rate_per, reducing_method, fixed_interest, fixed_interest_rate, frequency, fixed_term, min_term, max_term, grace_periods, amount_basis, min_amount, max_amount, savings_multiple, guarantors, min_guarantors, max_guarantors, late_fine, balance_fine, processing_fee, fine_deferment, needs_approval, is_hidden, settings, created_by, created_at, updated_at, deleted_at, for_debtors FROM loan_types WHERE group_id = $1 AND id = $2 AND deleted_at IS NULL
 `
 
 type GetLoanTypeParams struct {
@@ -823,16 +829,18 @@ func (q *Queries) GetLoanType(ctx context.Context, arg GetLoanTypeParams) (LoanT
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.ForDebtors,
 	)
 	return i, err
 }
 
 const getLoanView = `-- name: GetLoanView :one
-SELECT l.id, l.group_id, l.membership_id, l.loan_type_id, l.amount, l.disbursed_on, l.account_id, l.interest_type, l.interest_rate, l.rate_per, l.reducing_method, l.fixed_interest, l.fixed_interest_rate, l.frequency, l.installments, l.grace_periods, l.first_due_on, l.ends_on, l.late_fine, l.balance_fine, l.processing_fee, l.fine_deferment, l.next_balance_fine_on, l.is_bad_debt, l.description, l.settings, l.is_backdated, l.created_by, l.created_at, l.updated_at, l.voided_at, l.voided_by, (u.first_name || ' ' || u.last_name)::text AS member_name, coalesce(lt.name, '')::text AS loan_type_name,
-       coalesce(a.name, '')::text AS account_name
+SELECT l.id, l.group_id, l.membership_id, l.loan_type_id, l.amount, l.disbursed_on, l.account_id, l.interest_type, l.interest_rate, l.rate_per, l.reducing_method, l.fixed_interest, l.fixed_interest_rate, l.frequency, l.installments, l.grace_periods, l.first_due_on, l.ends_on, l.late_fine, l.balance_fine, l.processing_fee, l.fine_deferment, l.next_balance_fine_on, l.is_bad_debt, l.description, l.settings, l.is_backdated, l.created_by, l.created_at, l.updated_at, l.voided_at, l.voided_by, l.debtor_id, coalesce(u.first_name || ' ' || u.last_name, dr.name)::text AS member_name,
+       coalesce(lt.name, '')::text AS loan_type_name, coalesce(a.name, '')::text AS account_name
 FROM loans l
-JOIN memberships m ON m.id = l.membership_id
-JOIN users u ON u.id = m.user_id
+LEFT JOIN memberships m ON m.id = l.membership_id
+LEFT JOIN users u ON u.id = m.user_id
+LEFT JOIN debtors dr ON dr.id = l.debtor_id
 LEFT JOIN loan_types lt ON lt.id = l.loan_type_id
 LEFT JOIN group_accounts a ON a.id = l.account_id
 WHERE l.group_id = $1 AND l.id = $2
@@ -846,7 +854,7 @@ type GetLoanViewParams struct {
 type GetLoanViewRow struct {
 	ID                int64
 	GroupID           int64
-	MembershipID      int64
+	MembershipID      *int64
 	LoanTypeID        *int64
 	Amount            pgtype.Numeric
 	DisbursedOn       time.Time
@@ -876,11 +884,13 @@ type GetLoanViewRow struct {
 	UpdatedAt         time.Time
 	VoidedAt          *time.Time
 	VoidedBy          *int64
+	DebtorID          *int64
 	MemberName        string
 	LoanTypeName      string
 	AccountName       string
 }
 
+// member_name is the borrower's name: the member's, or the debtor's.
 func (q *Queries) GetLoanView(ctx context.Context, arg GetLoanViewParams) (GetLoanViewRow, error) {
 	row := q.db.QueryRow(ctx, getLoanView, arg.GroupID, arg.ID)
 	var i GetLoanViewRow
@@ -917,6 +927,7 @@ func (q *Queries) GetLoanView(ctx context.Context, arg GetLoanViewParams) (GetLo
 		&i.UpdatedAt,
 		&i.VoidedAt,
 		&i.VoidedBy,
+		&i.DebtorID,
 		&i.MemberName,
 		&i.LoanTypeName,
 		&i.AccountName,
@@ -1034,21 +1045,23 @@ func (q *Queries) ListLoanApplications(ctx context.Context, arg ListLoanApplicat
 const listLoanTypes = `-- name: ListLoanTypes :many
 
 
-SELECT id, group_id, name, interest_type, interest_rate, rate_per, reducing_method, fixed_interest, fixed_interest_rate, frequency, fixed_term, min_term, max_term, grace_periods, amount_basis, min_amount, max_amount, savings_multiple, guarantors, min_guarantors, max_guarantors, late_fine, balance_fine, processing_fee, fine_deferment, needs_approval, is_hidden, settings, created_by, created_at, updated_at, deleted_at FROM loan_types
+SELECT id, group_id, name, interest_type, interest_rate, rate_per, reducing_method, fixed_interest, fixed_interest_rate, frequency, fixed_term, min_term, max_term, grace_periods, amount_basis, min_amount, max_amount, savings_multiple, guarantors, min_guarantors, max_guarantors, late_fine, balance_fine, processing_fee, fine_deferment, needs_approval, is_hidden, settings, created_by, created_at, updated_at, deleted_at, for_debtors FROM loan_types
 WHERE group_id = $1 AND deleted_at IS NULL AND ($2::bool OR NOT is_hidden)
+  AND for_debtors = $3::bool
 ORDER BY name, id
 `
 
 type ListLoanTypesParams struct {
 	GroupID       int64
 	IncludeHidden bool
+	ForDebtors    bool
 }
 
 // Loans (milestone 4). A loan's balance is its live charges less its live
 // repayments; nothing is stored.
 // ---- Loan types ----
 func (q *Queries) ListLoanTypes(ctx context.Context, arg ListLoanTypesParams) ([]LoanType, error) {
-	rows, err := q.db.Query(ctx, listLoanTypes, arg.GroupID, arg.IncludeHidden)
+	rows, err := q.db.Query(ctx, listLoanTypes, arg.GroupID, arg.IncludeHidden, arg.ForDebtors)
 	if err != nil {
 		return nil, err
 	}
@@ -1089,6 +1102,7 @@ func (q *Queries) ListLoanTypes(ctx context.Context, arg ListLoanTypesParams) ([
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.ForDebtors,
 		); err != nil {
 			return nil, err
 		}
@@ -1112,21 +1126,24 @@ WITH t AS (
                      AND c.due_on < $4::date), 0) AS due_to_date
     FROM loans l
     WHERE l.group_id = $5
-      AND ($6::bigint IS NULL OR l.membership_id = $6)
-      AND ($7::bigint IS NULL OR l.loan_type_id = $7)
+      AND (l.debtor_id IS NOT NULL) = $6::bool
+      AND ($7::bigint IS NULL OR l.membership_id = $7)
+      AND ($8::bigint IS NULL OR l.debtor_id = $8)
+      AND ($9::bigint IS NULL OR l.loan_type_id = $9)
 )
-SELECT l.id, l.membership_id, l.loan_type_id, l.amount::text AS amount, l.disbursed_on, l.ends_on, l.account_id,
+SELECT l.id, l.membership_id, l.debtor_id, l.loan_type_id, l.amount::text AS amount, l.disbursed_on, l.ends_on, l.account_id,
        l.interest_type, l.interest_rate::text AS interest_rate, l.rate_per, l.frequency, l.installments,
        l.is_bad_debt, l.description, l.created_at, l.voided_at,
-       (u.first_name || ' ' || u.last_name)::text AS member_name,
+       coalesce(u.first_name || ' ' || u.last_name, dr.name)::text AS member_name,
        coalesce(lt.name, '')::text AS loan_type_name,
        t.payable::text AS payable, t.fines::text AS fines, t.interest::text AS interest, t.paid::text AS paid,
        (t.payable - t.paid)::text AS balance, greatest(t.due_to_date - t.paid, 0)::text AS overdue,
        count(*) OVER () AS total
 FROM loans l
 JOIN t ON t.id = l.id
-JOIN memberships m ON m.id = l.membership_id
-JOIN users u ON u.id = m.user_id
+LEFT JOIN memberships m ON m.id = l.membership_id
+LEFT JOIN users u ON u.id = m.user_id
+LEFT JOIN debtors dr ON dr.id = l.debtor_id
 LEFT JOIN loan_types lt ON lt.id = l.loan_type_id
 WHERE CASE $1::text
         WHEN 'open' THEN l.voided_at IS NULL AND t.payable - t.paid > 0
@@ -1144,13 +1161,16 @@ type ListLoansParams struct {
 	PageSize     int32
 	Today        time.Time
 	GroupID      int64
+	Debtors      bool
 	MembershipID *int64
+	DebtorID     *int64
 	LoanTypeID   *int64
 }
 
 type ListLoansRow struct {
 	ID           int64
-	MembershipID int64
+	MembershipID *int64
+	DebtorID     *int64
 	LoanTypeID   *int64
 	Amount       string
 	DisbursedOn  time.Time
@@ -1185,7 +1205,9 @@ func (q *Queries) ListLoans(ctx context.Context, arg ListLoansParams) ([]ListLoa
 		arg.PageSize,
 		arg.Today,
 		arg.GroupID,
+		arg.Debtors,
 		arg.MembershipID,
+		arg.DebtorID,
 		arg.LoanTypeID,
 	)
 	if err != nil {
@@ -1198,6 +1220,7 @@ func (q *Queries) ListLoans(ctx context.Context, arg ListLoansParams) ([]ListLoa
 		if err := rows.Scan(
 			&i.ID,
 			&i.MembershipID,
+			&i.DebtorID,
 			&i.LoanTypeID,
 			&i.Amount,
 			&i.DisbursedOn,
@@ -1445,8 +1468,13 @@ SELECT count(*) FILTER (WHERE l.voided_at IS NULL) AS loans,
 FROM loans l
 LEFT JOIN LATERAL (SELECT sum(amount) AS payable FROM loan_charges WHERE loan_id = l.id AND voided_at IS NULL) c ON true
 LEFT JOIN LATERAL (SELECT sum(amount) AS paid FROM loan_repayments WHERE loan_id = l.id AND voided_at IS NULL) r ON true
-WHERE l.group_id = $1
+WHERE l.group_id = $1 AND (l.debtor_id IS NOT NULL) = $2::bool
 `
+
+type LoanTotalsParams struct {
+	GroupID int64
+	Debtors bool
+}
 
 type LoanTotalsRow struct {
 	Loans   int64
@@ -1456,8 +1484,8 @@ type LoanTotalsRow struct {
 }
 
 // Group totals for the dashboard and loan reports.
-func (q *Queries) LoanTotals(ctx context.Context, groupID int64) (LoanTotalsRow, error) {
-	row := q.db.QueryRow(ctx, loanTotals, groupID)
+func (q *Queries) LoanTotals(ctx context.Context, arg LoanTotalsParams) (LoanTotalsRow, error) {
+	row := q.db.QueryRow(ctx, loanTotals, arg.GroupID, arg.Debtors)
 	var i LoanTotalsRow
 	err := row.Scan(
 		&i.Loans,

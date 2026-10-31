@@ -6,6 +6,7 @@
 -- name: ListLoanTypes :many
 SELECT * FROM loan_types
 WHERE group_id = $1 AND deleted_at IS NULL AND (sqlc.arg(include_hidden)::bool OR NOT is_hidden)
+  AND for_debtors = sqlc.arg(for_debtors)::bool
 ORDER BY name, id;
 
 -- name: GetLoanType :one
@@ -22,11 +23,12 @@ SELECT EXISTS (
 INSERT INTO loan_types (group_id, name, interest_type, interest_rate, rate_per, reducing_method, fixed_interest,
                         fixed_interest_rate, frequency, fixed_term, min_term, max_term, grace_periods, amount_basis,
                         min_amount, max_amount, savings_multiple, guarantors, min_guarantors, max_guarantors,
-                        late_fine, balance_fine, processing_fee, fine_deferment, needs_approval, is_hidden, created_by)
+                        late_fine, balance_fine, processing_fee, fine_deferment, needs_approval, is_hidden, created_by,
+                        for_debtors)
 VALUES ($1, $2, $3, sqlc.arg(interest_rate)::numeric, $4, $5, sqlc.arg(fixed_interest)::numeric,
         sqlc.arg(fixed_interest_rate)::numeric, $6, $7, $8, $9, $10, $11,
         sqlc.narg(min_amount)::numeric, sqlc.narg(max_amount)::numeric, sqlc.narg(savings_multiple)::numeric,
-        $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+        $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
 RETURNING id;
 
 -- name: UpdateLoanType :exec
@@ -48,13 +50,13 @@ WHERE group_id = $1 AND id = $2 AND deleted_at IS NULL;
 -- ---- Loans ----
 
 -- name: CreateLoan :one
-INSERT INTO loans (group_id, membership_id, loan_type_id, amount, disbursed_on, account_id, interest_type,
+INSERT INTO loans (group_id, membership_id, debtor_id, loan_type_id, amount, disbursed_on, account_id, interest_type,
                    interest_rate, rate_per, reducing_method, fixed_interest, fixed_interest_rate, frequency,
                    installments, grace_periods, first_due_on, ends_on, late_fine, balance_fine, processing_fee,
                    fine_deferment, next_balance_fine_on, description, created_by)
-VALUES ($1, $2, $3, sqlc.arg(amount)::numeric, $4, $5, $6, sqlc.arg(interest_rate)::numeric, $7, $8,
-        sqlc.arg(fixed_interest)::numeric, sqlc.arg(fixed_interest_rate)::numeric, $9, $10, $11, $12, $13,
-        $14, $15, $16, $17, $18, $19, $20)
+VALUES ($1, $2, $3, $4, sqlc.arg(amount)::numeric, $5, $6, $7, sqlc.arg(interest_rate)::numeric, $8, $9,
+        sqlc.arg(fixed_interest)::numeric, sqlc.arg(fixed_interest_rate)::numeric, $10, $11, $12, $13, $14,
+        $15, $16, $17, $18, $19, $20, $21)
 RETURNING id;
 
 -- name: CreateLoanCharge :one
@@ -132,21 +134,24 @@ WITH t AS (
                      AND c.due_on < sqlc.arg(today)::date), 0) AS due_to_date
     FROM loans l
     WHERE l.group_id = sqlc.arg(group_id)
+      AND (l.debtor_id IS NOT NULL) = sqlc.arg(debtors)::bool
       AND (sqlc.narg(membership_id)::bigint IS NULL OR l.membership_id = sqlc.narg(membership_id))
+      AND (sqlc.narg(debtor_id)::bigint IS NULL OR l.debtor_id = sqlc.narg(debtor_id))
       AND (sqlc.narg(loan_type_id)::bigint IS NULL OR l.loan_type_id = sqlc.narg(loan_type_id))
 )
-SELECT l.id, l.membership_id, l.loan_type_id, l.amount::text AS amount, l.disbursed_on, l.ends_on, l.account_id,
+SELECT l.id, l.membership_id, l.debtor_id, l.loan_type_id, l.amount::text AS amount, l.disbursed_on, l.ends_on, l.account_id,
        l.interest_type, l.interest_rate::text AS interest_rate, l.rate_per, l.frequency, l.installments,
        l.is_bad_debt, l.description, l.created_at, l.voided_at,
-       (u.first_name || ' ' || u.last_name)::text AS member_name,
+       coalesce(u.first_name || ' ' || u.last_name, dr.name)::text AS member_name,
        coalesce(lt.name, '')::text AS loan_type_name,
        t.payable::text AS payable, t.fines::text AS fines, t.interest::text AS interest, t.paid::text AS paid,
        (t.payable - t.paid)::text AS balance, greatest(t.due_to_date - t.paid, 0)::text AS overdue,
        count(*) OVER () AS total
 FROM loans l
 JOIN t ON t.id = l.id
-JOIN memberships m ON m.id = l.membership_id
-JOIN users u ON u.id = m.user_id
+LEFT JOIN memberships m ON m.id = l.membership_id
+LEFT JOIN users u ON u.id = m.user_id
+LEFT JOIN debtors dr ON dr.id = l.debtor_id
 LEFT JOIN loan_types lt ON lt.id = l.loan_type_id
 WHERE CASE sqlc.arg(status)::text
         WHEN 'open' THEN l.voided_at IS NULL AND t.payable - t.paid > 0
@@ -158,11 +163,13 @@ ORDER BY l.disbursed_on DESC, l.id DESC
 LIMIT sqlc.arg(page_size) OFFSET sqlc.arg(page_offset);
 
 -- name: GetLoanView :one
-SELECT l.*, (u.first_name || ' ' || u.last_name)::text AS member_name, coalesce(lt.name, '')::text AS loan_type_name,
-       coalesce(a.name, '')::text AS account_name
+-- member_name is the borrower's name: the member's, or the debtor's.
+SELECT l.*, coalesce(u.first_name || ' ' || u.last_name, dr.name)::text AS member_name,
+       coalesce(lt.name, '')::text AS loan_type_name, coalesce(a.name, '')::text AS account_name
 FROM loans l
-JOIN memberships m ON m.id = l.membership_id
-JOIN users u ON u.id = m.user_id
+LEFT JOIN memberships m ON m.id = l.membership_id
+LEFT JOIN users u ON u.id = m.user_id
+LEFT JOIN debtors dr ON dr.id = l.debtor_id
 LEFT JOIN loan_types lt ON lt.id = l.loan_type_id
 LEFT JOIN group_accounts a ON a.id = l.account_id
 WHERE l.group_id = $1 AND l.id = $2;
@@ -208,7 +215,7 @@ SELECT count(*) FILTER (WHERE l.voided_at IS NULL) AS loans,
 FROM loans l
 LEFT JOIN LATERAL (SELECT sum(amount) AS payable FROM loan_charges WHERE loan_id = l.id AND voided_at IS NULL) c ON true
 LEFT JOIN LATERAL (SELECT sum(amount) AS paid FROM loan_repayments WHERE loan_id = l.id AND voided_at IS NULL) r ON true
-WHERE l.group_id = $1;
+WHERE l.group_id = $1 AND (l.debtor_id IS NOT NULL) = sqlc.arg(debtors)::bool;
 
 -- name: DueLoanFines :many
 -- Live loans with a late or outstanding-balance fine due on or before today.

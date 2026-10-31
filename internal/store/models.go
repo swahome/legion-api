@@ -1417,6 +1417,24 @@ type BankBranch struct {
 	UpdatedAt time.Time
 }
 
+type BankLoan struct {
+	ID             int64
+	LegacyID       *int32
+	GroupID        int64
+	Description    string
+	Amount         pgtype.Numeric
+	TotalPayable   pgtype.Numeric
+	OpeningBalance pgtype.Numeric
+	StartsOn       time.Time
+	EndsOn         time.Time
+	AccountID      *int64
+	CreatedBy      *int64
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	VoidedAt       *time.Time
+	VoidedBy       *int64
+}
+
 type Contribution struct {
 	ID                      int64
 	LegacyID                *int32
@@ -1507,6 +1525,22 @@ type County struct {
 	UpdatedAt time.Time
 }
 
+type Debtor struct {
+	ID          int64
+	LegacyID    *int32
+	GroupID     int64
+	Name        string
+	Phone       string
+	Email       string
+	IDNumber    string
+	Description string
+	IsActive    bool
+	CreatedBy   *int64
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	DeletedAt   *time.Time
+}
+
 type Deposit struct {
 	ID               int64
 	LegacyID         *int32
@@ -1531,6 +1565,7 @@ type Deposit struct {
 	VoidedAt         *time.Time
 	VoidedBy         *int64
 	LoanID           *int64
+	BankLoanID       *int64
 }
 
 type Depositor struct {
@@ -1688,7 +1723,7 @@ type LedgerEntryRule struct {
 type Loan struct {
 	ID                int64
 	GroupID           int64
-	MembershipID      int64
+	MembershipID      *int64
 	LoanTypeID        *int64
 	Amount            pgtype.Numeric
 	DisbursedOn       time.Time
@@ -1718,6 +1753,7 @@ type Loan struct {
 	UpdatedAt         time.Time
 	VoidedAt          *time.Time
 	VoidedBy          *int64
+	DebtorID          *int64
 }
 
 type LoanApplication struct {
@@ -1847,6 +1883,7 @@ type LoanType struct {
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	DeletedAt         *time.Time
+	ForDebtors        bool
 }
 
 type LoginAttempt struct {
@@ -1993,6 +2030,7 @@ type Withdrawal struct {
 	VoidedAt          *time.Time
 	VoidedBy          *int64
 	LoanID            *int64
+	BankLoanID        *int64
 }
 
 type WithdrawalApproval struct {

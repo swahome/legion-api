@@ -408,7 +408,8 @@ func (p *Plan) createdBy(r Row, users map[int64]bool) *int64 {
 
 var DepositCols = []string{"id", "legacy_id", "legacy_type", "group_id", "account_id", "account_kind", "kind",
 	"method", "membership_id", "contribution_id", "fine_category_id", "income_category_id", "depositor_id",
-	"amount", "deposit_date", "description", "is_backdated", "refs", "created_by", "created_at", "voided_at", "loan_id"}
+	"amount", "deposit_date", "description", "is_backdated", "refs", "created_by", "created_at", "voided_at", "loan_id",
+	"bank_loan_id"}
 
 var depositRefs = []string{"loan_id", "loan_repayment_id", "stock_id", "stock_sale_id", "asset_id",
 	"money_market_investment_id", "bank_loan_id", "account_transfer_id", "transaction_alert_id", "debtor_id",
@@ -417,7 +418,7 @@ var depositRefs = []string{"loan_id", "loan_repayment_id", "stock_id", "stock_sa
 // deposits also returns, for loan repayments, legacy loan_repayment id ->
 // deposit id.
 func (p *Plan) deposits(rows []Row, ref refSets, ix *accountIndex, income, fines, depositors map[int64]int64,
-	loanSet loanSet, now time.Time) (ids map[int64]int64, repaymentDeposit map[int64]int64) {
+	loanSet loanSet, bankLoans map[int64]int64, now time.Time) (ids map[int64]int64, repaymentDeposit map[int64]int64) {
 	ids, repaymentDeposit = map[int64]int64{}, map[int64]int64{}
 	for _, r := range byID(rows) {
 		id, typ := r.Int("id"), r.Int("type")
@@ -440,7 +441,8 @@ func (p *Plan) deposits(rows []Row, ref refSets, ix *accountIndex, income, fines
 			inGroup(p, "deposits", "income_category_id", r, m.gid, income),
 			inGroup(p, "deposits", "depositor_id", r, m.gid, depositors),
 			m.amount, m.date, clean(r.Str("description")), r.Flag("is_a_back_dating_record"),
-			refsJSON(r, depositRefs...), p.createdBy(r, ref.users), m.created, m.voided, p.loanLink("deposits", r, m.gid, loanSet)})
+			refsJSON(r, depositRefs...), p.createdBy(r, ref.users), m.created, m.voided, p.loanLink("deposits", r, m.gid, loanSet),
+			p.bankLoanLink("deposits", r, m.gid, bankLoans)})
 		ids[id] = m.gid
 		if rid := r.Int("loan_repayment_id"); rid > 0 && kind == "loan_repayment" {
 			if _, dup := repaymentDeposit[rid]; dup {
@@ -468,13 +470,14 @@ func (p *Plan) loanLink(table string, r Row, gid int64, loanSet loanSet) *int64 
 
 var WithdrawalCols = []string{"id", "legacy_id", "legacy_type", "group_id", "account_id", "account_kind", "kind",
 	"method", "membership_id", "contribution_id", "expense_category_id", "amount", "withdrawal_date",
-	"description", "is_backdated", "refs", "created_by", "created_at", "voided_at", "loan_id"}
+	"description", "is_backdated", "refs", "created_by", "created_at", "voided_at", "loan_id", "bank_loan_id"}
 
 var withdrawalRefs = []string{"loan_id", "stock_id", "asset_id", "money_market_investment_id", "contribution_refund_id",
 	"bank_loan_id", "bank_loan_repayment_id", "account_transfer_id", "transaction_alert_id", "debtor_id",
 	"debtor_loan_id", "meeting_id"}
 
-func (p *Plan) withdrawals(rows []Row, ref refSets, ix *accountIndex, expense map[int64]int64, loanSet loanSet, now time.Time) map[int64]int64 {
+func (p *Plan) withdrawals(rows []Row, ref refSets, ix *accountIndex, expense map[int64]int64, loanSet loanSet,
+	bankLoans map[int64]int64, now time.Time) map[int64]int64 {
 	ids := map[int64]int64{}
 	for _, r := range byID(rows) {
 		id, typ := r.Int("id"), r.Int("type")
@@ -495,7 +498,8 @@ func (p *Plan) withdrawals(rows []Row, ref refSets, ix *accountIndex, expense ma
 			p.accountFor("withdrawals", ix, m.gid, acct, r.Str("account_id")), acct, kind, method, m.member, m.contrib,
 			inGroup(p, "withdrawals", "expense_category_id", r, m.gid, expense),
 			m.amount, m.date, clean(r.Str("description")), r.Flag("is_a_back_dating_record"),
-			refsJSON(r, withdrawalRefs...), p.createdBy(r, ref.users), m.created, m.voided, p.loanLink("withdrawals", r, m.gid, loanSet)})
+			refsJSON(r, withdrawalRefs...), p.createdBy(r, ref.users), m.created, m.voided, p.loanLink("withdrawals", r, m.gid, loanSet),
+			p.bankLoanLink("withdrawals", r, m.gid, bankLoans)})
 		ids[id] = m.gid
 	}
 	return ids
