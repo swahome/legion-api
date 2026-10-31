@@ -112,6 +112,34 @@ func New(pool *pgxpool.Pool, keys *Keys, authSvc *auth.Service, otp OTPSender) *
 		"invoices/get_group_invoice":                                 {fn: s.groupAction(6, s.groupInvoice)},
 		"fines/get_group_fines_list":                                 {fn: s.groupAction(6, s.finesList)},
 		"fines/get_group_fine_options":                               {fn: s.groupAction(6, s.fineOptions)},
+
+		// Milestone 3: recording money from the app.
+		"deposits/record_contribution_payments":      {fn: s.groupAction(6, s.recordDeposits("contribution", "Error contribution payments array empty."))},
+		"deposits/record_fine_payments":              {fn: s.groupAction(6, s.recordDeposits("fine", "Error fine payments array empty."))},
+		"deposits/record_miscellaneous_payments":     {fn: s.groupAction(6, s.recordDeposits("misc", "Error miscellaneous payments array empty."))},
+		"deposits/record_income":                     {fn: s.groupAction(6, s.recordDeposits("income", "Error income payments array empty."))},
+		"deposits/new_record_contribution_payments":  {fn: s.groupAction(6, s.newMemberDeposits("contribution"))},
+		"deposits/new_record_fine_payments":          {fn: s.groupAction(6, s.newMemberDeposits("fine"))},
+		"deposits/new_record_miscellaneous_payments": {fn: s.groupAction(6, s.newDeposit("misc"))},
+		"deposits/new_record_income_payment":         {fn: s.groupAction(6, s.newDeposit("income"))},
+		"deposits/void":                              {fn: s.groupAction(6, s.officialsOnly(s.voidDeposit))},
+		"withdrawals/record_expenses":                {fn: s.groupAction(6, s.officialsOnly(s.recordExpenses))},
+		"withdrawals/new_record_expenses":            {fn: s.groupAction(6, s.officialsOnly(s.newRecordExpense))},
+		"withdrawals/record_contribution_refund":     {fn: s.groupAction(6, s.officialsOnly(s.recordContributionRefund))},
+		"withdrawals/record_funds_transfer":          {fn: s.groupAction(6, s.officialsOnly(s.recordFundsTransfer))},
+		"withdrawals/void":                           {fn: s.groupAction(6, s.officialsOnly(s.voidWithdrawal))},
+		"fines/fine_members":                         {fn: s.groupAction(6, s.officialsOnly(s.fineMembers))},
+		"fines/new_fine_members":                     {fn: s.groupAction(6, s.officialsOnly(s.newFineMembers))},
+		"invoices/create":                            {fn: s.groupAction(6, s.officialsOnly(s.createInvoices))},
+		"invoices/void":                              {fn: s.groupAction(6, s.officialsOnly(s.voidInvoice))},
+		"depositors/create":                          {fn: s.groupAction(6, s.officialsOnly(s.createDepositor))},
+	}
+	for module, kind := range map[string]string{"income_categories": "income", "expense_categories": "expense", "fine_categories": "fine"} {
+		s.actions[module+"/create"] = action{fn: s.groupAction(6, s.createCategory(kind))}
+		s.actions[module+"/edit"] = action{fn: s.groupAction(6, s.editCategory(kind))}
+		s.actions[module+"/hide"] = action{fn: s.groupAction(6, s.hideCategory(kind, true))}
+		s.actions[module+"/unhide"] = action{fn: s.groupAction(6, s.hideCategory(kind, false))}
+		s.actions[module+"/delete"] = action{fn: s.groupAction(6, s.deleteCategory(kind))}
 	}
 	return s
 }
@@ -181,6 +209,21 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		out.send(http.StatusOK, status(3, "You are currently using an outdated application. Kindly update to latest version. Your request could not be handled at the moment. if the error persist, contact admin"))
 		return
 	}
+	// Recording actions carry a request id so a retry isn't recorded twice
+	// (legacy _request_id_required). It is checked before the user id, as before.
+	var requestID string
+	if known && requestIDActions[name] {
+		reply, err := s.claimRequestID(r.Context(), c.req.Str("request_id"))
+		if err != nil {
+			out.internal(r, err)
+			return
+		}
+		if reply != nil {
+			out.sendUnwrapped(http.StatusOK, reply)
+			return
+		}
+		requestID = c.req.Str("request_id")
+	}
 	if c.userID != 0 && c.req.Int("user_id") != c.userID {
 		out.send(http.StatusOK, status(400, "user Authentication token is invalid."))
 		return
@@ -190,6 +233,12 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp, err := act.fn(r.Context(), c)
+	if requestID != "" && (err != nil || failed(resp)) {
+		// Let the app retry a request that wasn't recorded.
+		if err := s.q.ReleaseMobileRequestID(context.WithoutCancel(r.Context()), requestID); err != nil {
+			slog.ErrorContext(r.Context(), "mobile: release request id", "err", err)
+		}
+	}
 	if err != nil {
 		out.internal(r, err)
 		return
@@ -209,6 +258,14 @@ func (o *responder) send(code int, resp any) {
 	if o.version <= unwrapVersionCode {
 		v = map[string]any{"response": resp}
 	}
+	o.write(code, v)
+}
+
+// sendUnwrapped encrypts resp as it is, for the answers the legacy
+// controller sent before reaching an action.
+func (o *responder) sendUnwrapped(code int, resp any) { o.write(code, resp) }
+
+func (o *responder) write(code int, v any) {
 	b, err := o.keys.EncryptResponse(v)
 	if err != nil {
 		slog.Error("mobile: encrypt response", "err", err)

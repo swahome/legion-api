@@ -81,9 +81,12 @@ cmd/legion-api   the binary: serve, migrate, create-user, import-legacy, billing
 db/migrations    goose SQL migrations (embedded)
 db/queries       sqlc query files
 internal/auth    login, throttling, tokens, refresh rotation
+internal/billing nightly invoicing and fines, and the in-process scheduler
+internal/books   money writes shared by the web and mobile APIs: deposits, withdrawals, transfers, fines
 internal/config  .env and environment settings
 internal/httpapi chi routes and handlers
 internal/legacy  MySQL dump reader and the legacy data import
+internal/mobile  the legacy-compatible mobile app API
 internal/store   sqlc generated code (do not edit; run `make generate`)
 docs/            schema mapping and API notes
 ```
