@@ -160,9 +160,120 @@ func TestLoadAndReconcile(t *testing.T) {
 		t.Fatalf("balance = %s, %v", bal, err)
 	}
 
+	// Account balances: initial balance plus live cash book entries.
+	got := map[string]string{}
+	rows, err := pool.Query(ctx, `
+		SELECT coalesce(a.name, 'unknown ' || e.account_kind), (coalesce(a.initial_balance, 0) + sum(e.direction * e.amount))::text
+		FROM account_entries e LEFT JOIN group_accounts a ON a.id = e.account_id
+		WHERE e.voided_at IS NULL GROUP BY 1, a.initial_balance ORDER BY 1`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var name, b string
+		if err := rows.Scan(&name, &b); err != nil {
+			t.Fatal(err)
+		}
+		got[name] = b
+	}
+	if got["Main"] != "600.00" || got["Projects"] != "3000.50" || got["Petty cash"] != "200.00" || got["unknown bank"] != "50.00" {
+		t.Errorf("account balances: %v", got)
+	}
+	var ledgerDeposit, fineCat *int64
+	if err := pool.QueryRow(ctx, `SELECT (SELECT deposit_id FROM ledger_entries WHERE id = 2), (SELECT fine_category_id FROM ledger_entries WHERE id = 6)`).Scan(&ledgerDeposit, &fineCat); err != nil ||
+		ledgerDeposit == nil || *ledgerDeposit != 500 || fineCat == nil || *fineCat != 7 {
+		t.Errorf("ledger links: %v %v %v", ledgerDeposit, fineCat, err)
+	}
+	if !strings.Contains(buf.String(), "account balances (informational)") {
+		t.Errorf("report: %s", buf.String())
+	}
+
 	// New rows get ids after the imported ones.
 	var id int64
 	if err := pool.QueryRow(ctx, `INSERT INTO groups (name, slug) VALUES ('New', 'new') RETURNING id`).Scan(&id); err != nil || id <= 16 {
 		t.Fatalf("new group id = %d, %v", id, err)
+	}
+}
+
+func TestLegacyTypeCodes(t *testing.T) {
+	for _, c := range []struct {
+		typ           int64
+		kind, account string
+	}{
+		{1, "contribution", "bank"}, {3, "contribution", "mobile_money"}, {7, "contribution", "petty_cash"},
+		{4, "fine", "bank"}, {8, "fine", "petty_cash"}, {9, "misc", "bank"}, {16, "income", "petty_cash"},
+		{17, "loan_repayment", "bank"}, {38, "funds_transfer", "sacco"},
+		{44, "loan_processing_income", "petty_cash"}, {52, "external_lending_repayment", "petty_cash"},
+	} {
+		kind, acct, ok := DepositType(c.typ)
+		if !ok || kind != c.kind || acct != c.account {
+			t.Errorf("deposit type %d = %s/%s, want %s/%s", c.typ, kind, acct, c.kind, c.account)
+		}
+	}
+	if _, _, ok := DepositType(53); ok {
+		t.Error("deposit type 53 should be unknown")
+	}
+	for _, c := range []struct {
+		typ           int64
+		kind, account string
+	}{
+		{1, "expense", "bank"}, {12, "loan_disbursement", "petty_cash"}, {21, "contribution_refund", "bank"},
+		{30, "funds_transfer", "sacco"}, {40, "dividend", "petty_cash"},
+	} {
+		kind, acct, ok := WithdrawalType(c.typ)
+		if !ok || kind != c.kind || acct != c.account {
+			t.Errorf("withdrawal type %d = %s/%s, want %s/%s", c.typ, kind, acct, c.kind, c.account)
+		}
+	}
+	for _, c := range []struct {
+		typ     int64
+		dir     int16
+		account string
+	}{
+		{1, 1, "bank"}, {7, 1, "petty_cash"}, {40, 1, "petty_cash"}, {41, -1, "bank"}, {64, -1, "petty_cash"},
+		{73, 1, "bank"}, {77, -1, "bank"}, {82, 1, "sacco"}, {88, 1, "petty_cash"}, {89, -1, "bank"}, {92, -1, "petty_cash"},
+	} {
+		dir, acct, ok := EntryType(c.typ)
+		if !ok || dir != c.dir || acct != c.account {
+			t.Errorf("entry type %d = %d/%s, want %d/%s", c.typ, dir, acct, c.dir, c.account)
+		}
+	}
+}
+
+func TestTransformMoney(t *testing.T) {
+	tables := readFixture(t)
+	p, err := Transform(tables, tables["users_groups"], Options{}, fixedNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := p.Report
+	for k, v := range map[string]int{
+		"group_accounts": 3, "fine_categories": 1, "deposits": 3, "withdrawals": 1, "account_entries": 5,
+	} {
+		if r.Imported[k] != v {
+			t.Errorf("%s: imported %d, want %d", k, r.Imported[k], v)
+		}
+	}
+	for _, issue := range []string{
+		"bank_accounts: group missing, skipped",
+		"bank_accounts: bank_branch_id missing, cleared",
+		"deposits: unknown type 99, skipped",
+		"deposits: account taken as the group's only account of that kind",
+		"deposits: account unknown (several accounts of that kind), kept without account",
+	} {
+		if r.Issues[issue] == 0 {
+			t.Errorf("missing issue %q in %v", issue, r.Issues)
+		}
+	}
+	// Legacy account ids overlap across the four tables; new ids do not.
+	if p.Accounts[0][0] != int64(1) || p.Accounts[2][0] != int64(3) || p.Accounts[2][3] != "petty_cash" || p.Accounts[2][1] != int64(1) {
+		t.Errorf("account ids: %v", p.Accounts)
+	}
+	// "bank-2" resolves to the second bank account (new id 2).
+	if id := p.Deposits[0][4].(*int64); id == nil || *id != 2 {
+		t.Errorf("deposit 500 account = %v", p.Deposits[0][4])
+	}
+	if refs := string(p.Deposits[2][17].([]byte)); refs != `{"loan_id":31}` {
+		t.Errorf("deposit refs = %s", refs)
 	}
 }

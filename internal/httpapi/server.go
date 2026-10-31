@@ -66,6 +66,9 @@ func (s *Server) Routes() http.Handler {
 				r.Get("/counties", s.listCounties)
 				r.Get("/banks", s.listBanks)
 				r.Get("/banks/{bankID}/branches", s.listBranches)
+				r.Get("/saccos", s.listSaccos)
+				r.Get("/saccos/{saccoID}/branches", s.listSaccoBranches)
+				r.Get("/mobile-money-providers", s.listMobileMoneyProviders)
 			})
 
 			r.Route("/admin", func(r chi.Router) {
@@ -108,6 +111,10 @@ func (s *Server) Routes() http.Handler {
 				r.Get("/contributions", s.listContributions)
 				r.Get("/contributions/{contributionID}", s.getContribution)
 
+				r.Get("/income-categories", s.listCategories(s.incomeCategories))
+				r.Get("/expense-categories", s.listCategories(s.expenseCategories))
+				r.Get("/fine-categories", s.listCategories(s.fineCategories))
+
 				r.Group(func(r chi.Router) {
 					r.Use(requireOfficial)
 					r.Post("/members", s.addMember)
@@ -115,6 +122,27 @@ func (s *Server) Routes() http.Handler {
 					r.Post("/contributions", s.createContribution)
 					r.Patch("/contributions/{contributionID}", s.updateContribution)
 					r.Get("/contribution-balances", s.contributionBalances)
+
+					r.Get("/accounts", s.listAccounts)
+					r.Post("/accounts", s.createAccount)
+					r.Patch("/accounts/{accountID}", s.updateAccount)
+					r.Delete("/accounts/{accountID}", s.deleteAccount)
+					r.Get("/cash-book", s.cashBook)
+
+					r.Post("/income-categories", s.createCategory(s.incomeCategories))
+					r.Patch("/income-categories/{categoryID}", s.updateCategory(s.incomeCategories))
+					r.Post("/expense-categories", s.createCategory(s.expenseCategories))
+					r.Patch("/expense-categories/{categoryID}", s.updateCategory(s.expenseCategories))
+					r.Post("/fine-categories", s.createCategory(s.fineCategories))
+					r.Patch("/fine-categories/{categoryID}", s.updateCategory(s.fineCategories))
+					r.Get("/depositors", s.listDepositors)
+					r.Post("/depositors", s.createDepositor)
+					r.Patch("/depositors/{depositorID}", s.updateDepositor)
+
+					r.Get("/deposits", s.listDeposits)
+					r.Post("/deposits", s.createDeposit)
+					r.Get("/deposits/{depositID}", s.getDeposit)
+					r.Post("/deposits/{depositID}/void", s.voidDeposit)
 				})
 			})
 		})

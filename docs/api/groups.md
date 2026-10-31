@@ -32,6 +32,28 @@ someone takes effect immediately, without waiting for their token to expire.
 | PATCH | `/contributions/{id}` | official | Any field except `kind`. `schedule` and `member_ids` replace the existing ones when sent |
 | GET | `/contribution-balances` | official | Every active member's payable, paid and balance, most in arrears first |
 
+### Money (milestone 3)
+
+| Method | Path | Who | Notes |
+|---|---|---|---|
+| GET | `/accounts` | official | Bank, sacco, mobile money and petty cash accounts with balances, plus `unassigned` (legacy entries whose account is unknown, by kind) and `total_balance` |
+| POST | `/accounts` | official | `kind`, `name`, optional `account_number`, `institution_id` (bank, sacco or provider id; not for petty cash), `branch_id` (bank or sacco branch), `initial_balance`, `is_default` (one default per kind) |
+| PATCH | `/accounts/{id}` | official | `name`, `account_number`, `branch_id` (null clears), `initial_balance`, `is_default`, `is_closed`. Kind and institution can't change |
+| DELETE | `/accounts/{id}` | official | Only for an account with no transactions (409 `account_has_transactions`; close it instead) |
+| GET | `/cash-book?from=&to=&account_id=` | official | Money in and out with a running balance, opening and closing balance and totals. Defaults to the last 12 months. With `account_id` it is that account's statement. At most 5000 rows (`truncated`) |
+| GET | `/deposits?kind=&member_id=&account_id=&from=&to=&include_voided=&page=&page_size=` | official | Newest first, paged, with `totals_by_kind` for the same filters |
+| GET | `/deposits/{id}` | official | Includes the member ledger entries it created |
+| POST | `/deposits` | official | `kind` (`contribution`, `fine`, `misc` or `income`), `account_id`, `amount`, `date`, optional `method` (`mpesa`, `cash`, `cheque`, `funds_transfer`, `equitel`, `standing_order`) and `description`. Contribution: `member_id`, `contribution_id`. Fine: `member_id` and `fine_category_id`, or `contribution_id` for a contribution's late fine. Misc: `member_id`. Income: `income_category_id`, optional `depositor_id`. Member payments credit the member's ledger |
+| POST | `/deposits/{id}/void` | official | Voids the deposit, its cash book entry and its ledger entry. 409 `already_voided` |
+| GET | `/income-categories`, `/expense-categories`, `/fine-categories` | member | Active, visible ones. Officials can add `?all=true` |
+| POST, PATCH | `/income-categories[/{id}]`, `/expense-categories[/{id}]`, `/fine-categories[/{id}]` | official | `name`, `description`, `is_hidden`, `is_active`; fine categories also take `amount` |
+| GET, POST, PATCH | `/depositors[/{id}]` | official | Outside payers for income: `name`, `email`, `phone`, `description`, `is_active` |
+
+Reference lists for opening accounts: `/v1/reference/banks` (and branches),
+`/v1/reference/saccos`, `/v1/reference/saccos/{id}/branches` and
+`/v1/reference/mobile-money-providers`. See `docs/schema/money.md` for the tables
+and the legacy type codes.
+
 ## Conventions
 
 - Money is a decimal string with two places, such as `"4200.00"`. Requests accept a

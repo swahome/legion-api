@@ -30,22 +30,47 @@ var targets = []struct {
 	{"contribution_schedules", ScheduleCols, func(p *Plan) [][]any { return p.Schedules }},
 	{"contribution_members", ContributionMemberCols, func(p *Plan) [][]any { return p.ContributionMembers }},
 	{"contribution_fine_rules", FineRuleCols, func(p *Plan) [][]any { return p.FineRules }},
-	{"ledger_entries", LedgerCols, func(p *Plan) [][]any { return p.Ledger }},
 	{"countries", CountryCols, func(p *Plan) [][]any { return p.Countries }},
 	{"counties", CountyCols, func(p *Plan) [][]any { return p.Counties }},
 	{"banks", BankCols, func(p *Plan) [][]any { return p.Banks }},
 	{"bank_branches", BankBranchCols, func(p *Plan) [][]any { return p.BankBranches }},
+	{"saccos", SaccoCols, func(p *Plan) [][]any { return p.Saccos }},
+	{"sacco_branches", SaccoBranchCols, func(p *Plan) [][]any { return p.SaccoBranches }},
+	{"mobile_money_providers", ProviderCols, func(p *Plan) [][]any { return p.Providers }},
+	{"group_accounts", AccountCols, func(p *Plan) [][]any { return p.Accounts }},
+	{"income_categories", IncomeCategoryCols, func(p *Plan) [][]any { return p.IncomeCategories }},
+	{"expense_categories", ExpenseCategoryCols, func(p *Plan) [][]any { return p.ExpenseCategories }},
+	{"fine_categories", FineCategoryCols, func(p *Plan) [][]any { return p.FineCategories }},
+	{"depositors", DepositorCols, func(p *Plan) [][]any { return p.Depositors }},
+	{"deposits", DepositCols, func(p *Plan) [][]any { return p.Deposits }},
+	{"withdrawals", WithdrawalCols, func(p *Plan) [][]any { return p.Withdrawals }},
+	{"account_transfers", AccountTransferCols, func(p *Plan) [][]any { return p.AccountTransfers }},
+	{"account_entries", AccountEntryCols, func(p *Plan) [][]any { return p.AccountEntries }},
+	{"ledger_entries", LedgerCols, func(p *Plan) [][]any { return p.Ledger }},
 	{"platform_settings", SettingCols, func(p *Plan) [][]any { return p.Settings }},
 	{"mobile_access_tokens", MobileTokenCols, func(p *Plan) [][]any { return p.MobileTokens }},
 }
 
 // Tables with identity ids whose sequences must move past the imported ids.
 var identityTables = []string{"users", "groups", "group_roles", "memberships", "contributions",
-	"contribution_fine_rules", "ledger_entries", "countries", "counties", "banks", "bank_branches"}
+	"contribution_fine_rules", "ledger_entries", "countries", "counties", "banks", "bank_branches",
+	"saccos", "sacco_branches", "mobile_money_providers", "group_accounts", "income_categories",
+	"expense_categories", "fine_categories", "depositors", "deposits", "withdrawals", "account_transfers",
+	"account_entries"}
 
 var enumTypes = []string{
 	"platform_role", "group_status", "membership_status", "contribution_kind",
 	"contribution_category", "contribution_frequency", "fine_kind", "ledger_entry_type",
+	"account_kind", "deposit_kind", "withdrawal_kind", "payment_method",
+}
+
+// Columns that hold decimal strings to send as numeric.
+var numericColumns = map[string][]string{
+	"contributions": {"amount"}, "ledger_entries": {"amount"},
+	"contribution_fine_rules": {"fixed_amount", "percentage_rate"},
+	"group_accounts":          {"initial_balance"}, "fine_categories": {"amount"},
+	"deposits": {"amount"}, "withdrawals": {"amount"}, "account_transfers": {"amount"},
+	"account_entries": {"amount"},
 }
 
 var ErrNotEmpty = errors.New("target database already has data; pass -replace to wipe and reload it")
@@ -67,7 +92,9 @@ func Load(ctx context.Context, pool *pgxpool.Pool, p *Plan, replace bool) error 
 
 	return pgx.BeginFunc(ctx, conn.Conn(), func(tx pgx.Tx) error {
 		if replace {
-			_, err := tx.Exec(ctx, `TRUNCATE ledger_entries, contribution_fine_rules, contribution_members,
+			_, err := tx.Exec(ctx, `TRUNCATE ledger_entries, account_entries, account_transfers, withdrawals,
+				deposits, depositors, fine_categories, expense_categories, income_categories, group_accounts,
+				mobile_money_providers, sacco_branches, saccos, contribution_fine_rules, contribution_members,
 				contribution_schedules, contributions, memberships, group_roles, groups,
 				refresh_tokens, login_attempts, user_platform_roles, admin_audit_log, platform_settings,
 				mobile_access_tokens, mobile_pins,
@@ -86,16 +113,9 @@ func Load(ctx context.Context, pool *pgxpool.Pool, p *Plan, replace bool) error 
 		}
 		for _, t := range targets {
 			rows := t.rows(p)
-			if t.name == "contributions" || t.name == "ledger_entries" {
-				if err := numericColumn(rows, t.cols, "amount"); err != nil {
+			for _, c := range numericColumns[t.name] {
+				if err := numericColumn(rows, t.cols, c); err != nil {
 					return fmt.Errorf("%s: %w", t.name, err)
-				}
-			}
-			if t.name == "contribution_fine_rules" {
-				for _, c := range []string{"fixed_amount", "percentage_rate"} {
-					if err := numericColumn(rows, t.cols, c); err != nil {
-						return fmt.Errorf("%s: %w", t.name, err)
-					}
 				}
 			}
 			n, err := tx.CopyFrom(ctx, pgx.Identifier{t.name}, t.cols, pgx.CopyFromRows(rows))
@@ -232,7 +252,63 @@ func Reconcile(ctx context.Context, pool *pgxpool.Pool, t Tables, w io.Writer) (
 		}
 	}
 	fmt.Fprintf(w, "legacy balance cache (informational): %d members compared, %d differ by 1 KES or more\n", cacheChecked, cacheDiff)
-	return mismatches, nil
+	return mismatches, reconcileAccounts(ctx, pool, t, w)
+}
+
+// reconcileAccounts compares each account's balance with the legacy
+// running total (current_balance, which the old app adds to the initial
+// balance). Informational: the legacy total is an integer kept up to date
+// by the old app's own jobs, and an anonymized dump cannot attribute most
+// entries to an account.
+func reconcileAccounts(ctx context.Context, pool *pgxpool.Pool, t Tables, w io.Writer) error {
+	legacy := map[accountKey]float64{}
+	for table, kind := range map[string]string{"bank_accounts": "bank", "sacco_accounts": "sacco",
+		"mobile_money_accounts": "mobile_money", "petty_cash_accounts": "petty_cash"} {
+		for _, r := range t[table] {
+			if r["current_balance"] != nil {
+				legacy[accountKey{kind, r.Int("id")}] = float64(r.Int("current_balance"))
+			}
+		}
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT a.kind::text, a.legacy_id, coalesce(sum(e.direction * e.amount), 0)::float8,
+		       count(*) FILTER (WHERE e.id IS NOT NULL)
+		FROM group_accounts a
+		LEFT JOIN account_entries e ON e.account_id = a.id AND e.voided_at IS NULL
+		WHERE a.legacy_id IS NOT NULL
+		GROUP BY a.id`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	checked, differ := 0, 0
+	for rows.Next() {
+		var kind string
+		var lid int64
+		var ours float64
+		var n int64
+		if err := rows.Scan(&kind, &lid, &ours, &n); err != nil {
+			return err
+		}
+		want, ok := legacy[accountKey{kind, lid}]
+		if !ok || n == 0 {
+			continue
+		}
+		checked++
+		if math.Abs(ours-want) >= 1 {
+			differ++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	var unknown int64
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM account_entries WHERE account_id IS NULL`).Scan(&unknown); err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "account balances (informational): %d accounts compared with legacy current_balance, %d differ by 1 KES or more; %d cash book entries have no known account\n",
+		checked, differ, unknown)
+	return nil
 }
 
 // WriteReport prints the import counts and issues.
