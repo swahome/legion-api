@@ -45,9 +45,29 @@ someone takes effect immediately, without waiting for their token to expire.
 | GET | `/deposits/{id}` | official | Includes the member ledger entries it created |
 | POST | `/deposits` | official | `kind` (`contribution`, `fine`, `misc` or `income`), `account_id`, `amount`, `date`, optional `method` (`mpesa`, `cash`, `cheque`, `funds_transfer`, `equitel`, `standing_order`) and `description`. Contribution: `member_id`, `contribution_id`. Fine: `member_id` and `fine_category_id`, or `contribution_id` for a contribution's late fine. Misc: `member_id`. Income: `income_category_id`, optional `depositor_id`. Member payments credit the member's ledger |
 | POST | `/deposits/{id}/void` | official | Voids the deposit, its cash book entry and its ledger entry. 409 `already_voided` |
+| GET | `/withdrawals?kind=&member_id=&account_id=&from=&to=&include_voided=&page=&page_size=` | official | Newest first, paged, with `totals_by_kind` |
+| GET | `/withdrawals/{id}` | official | |
+| POST | `/withdrawals` | official | Money that has already left an account. `kind` (`expense` or `contribution_refund`), `account_id`, `amount`, `date`, optional `method`, `description`. Expense: `expense_category_id`. Refund: `member_id`, `contribution_id`, at most what the member has paid in (400 `refund_too_large`); it comes off the member's contribution balance |
+| POST | `/withdrawals/{id}/void` | official | Voids it with its cash book and ledger entries. 409 `already_voided` |
+| GET | `/transfers?account_id=&from=&to=&include_voided=&page=&page_size=` | official | Transfers between the group's own accounts; `account_id` matches either side |
+| POST | `/transfers` | official | `from_account_id`, `to_account_id`, `amount`, `date`, `description` |
+| POST | `/transfers/{id}/void` | official | 409 `already_voided` |
+| GET | `/withdrawal-requests?status=&awaiting=me&page=&page_size=` | official or signatory | Requests to pay money out, newest first, with approval counts. `awaiting=me` lists those waiting on the caller |
+| GET | `/withdrawal-requests/{id}` | official or signatory | Adds `approval_list` (each signatory's decision) and `my_decision` |
+| POST | `/withdrawal-requests` | official | `kind` (`expense`, `contribution_refund` or `funds_transfer`), `account_id`, `amount`, `description`, the same fields as a withdrawal, `to_account_id` for a transfer, and `recipient` (`{type: mobile, phone}`, `{type: paybill, paybill, account_number}` or `{type: bank, bank_id, account_number, account_name}`) except for transfers. The account must hold the amount (400 `insufficient_balance`). Needs at least two signatories (409 `not_enough_signatories`) |
+| POST | `/withdrawal-requests/{id}/approve` | signatory | `password`. 401 `wrong_password`, 429 after repeated wrong passwords, 409 if already answered or the request is closed |
+| POST | `/withdrawal-requests/{id}/decline` | signatory | `password`, `reason` |
+| POST | `/withdrawal-requests/{id}/cancel` | official | Optional `reason`. Pending or approved requests only |
+| POST | `/withdrawal-requests/{id}/pay` | official | Records the money leaving an approved request: `date`, optional `method`. Writes the withdrawal (or transfer) and sets `withdrawal_id` or `transfer_id` |
 | GET | `/income-categories`, `/expense-categories`, `/fine-categories` | member | Active, visible ones. Officials can add `?all=true` |
 | POST, PATCH | `/income-categories[/{id}]`, `/expense-categories[/{id}]`, `/fine-categories[/{id}]` | official | `name`, `description`, `is_hidden`, `is_active`; fine categories also take `amount` |
 | GET, POST, PATCH | `/depositors[/{id}]` | official | Outside payers for income: `name`, `email`, `phone`, `description`, `is_active` |
+
+**Signatories** are active members who hold a group role, as in the legacy
+e-wallet; when the group's legacy `restrict_wallet_approval_to_group_admins` flag is
+set, only officials among them. Every signatory must approve; one decline declines
+the request. The official who asks counts as approving. Paying is a manual step
+until the payment API is wired in.
 
 Reference lists for opening accounts: `/v1/reference/banks` (and branches),
 `/v1/reference/saccos`, `/v1/reference/saccos/{id}/branches` and

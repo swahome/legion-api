@@ -46,6 +46,8 @@ var targets = []struct {
 	{"withdrawals", WithdrawalCols, func(p *Plan) [][]any { return p.Withdrawals }},
 	{"account_transfers", AccountTransferCols, func(p *Plan) [][]any { return p.AccountTransfers }},
 	{"account_entries", AccountEntryCols, func(p *Plan) [][]any { return p.AccountEntries }},
+	{"withdrawal_requests", WithdrawalRequestCols, func(p *Plan) [][]any { return p.WithdrawalRequests }},
+	{"withdrawal_approvals", WithdrawalApprovalCols, func(p *Plan) [][]any { return p.WithdrawalApprovals }},
 	{"ledger_entries", LedgerCols, func(p *Plan) [][]any { return p.Ledger }},
 	{"platform_settings", SettingCols, func(p *Plan) [][]any { return p.Settings }},
 	{"mobile_access_tokens", MobileTokenCols, func(p *Plan) [][]any { return p.MobileTokens }},
@@ -56,12 +58,13 @@ var identityTables = []string{"users", "groups", "group_roles", "memberships", "
 	"contribution_fine_rules", "ledger_entries", "countries", "counties", "banks", "bank_branches",
 	"saccos", "sacco_branches", "mobile_money_providers", "group_accounts", "income_categories",
 	"expense_categories", "fine_categories", "depositors", "deposits", "withdrawals", "account_transfers",
-	"account_entries"}
+	"account_entries", "withdrawal_requests", "withdrawal_approvals"}
 
 var enumTypes = []string{
 	"platform_role", "group_status", "membership_status", "contribution_kind",
 	"contribution_category", "contribution_frequency", "fine_kind", "ledger_entry_type",
 	"account_kind", "deposit_kind", "withdrawal_kind", "payment_method",
+	"withdrawal_request_status", "approval_decision",
 }
 
 // Columns that hold decimal strings to send as numeric.
@@ -70,7 +73,7 @@ var numericColumns = map[string][]string{
 	"contribution_fine_rules": {"fixed_amount", "percentage_rate"},
 	"group_accounts":          {"initial_balance"}, "fine_categories": {"amount"},
 	"deposits": {"amount"}, "withdrawals": {"amount"}, "account_transfers": {"amount"},
-	"account_entries": {"amount"},
+	"account_entries": {"amount"}, "withdrawal_requests": {"amount"},
 }
 
 var ErrNotEmpty = errors.New("target database already has data; pass -replace to wipe and reload it")
@@ -92,7 +95,7 @@ func Load(ctx context.Context, pool *pgxpool.Pool, p *Plan, replace bool) error 
 
 	return pgx.BeginFunc(ctx, conn.Conn(), func(tx pgx.Tx) error {
 		if replace {
-			_, err := tx.Exec(ctx, `TRUNCATE ledger_entries, account_entries, account_transfers, withdrawals,
+			_, err := tx.Exec(ctx, `TRUNCATE withdrawal_approvals, withdrawal_requests, ledger_entries, account_entries, account_transfers, withdrawals,
 				deposits, depositors, fine_categories, expense_categories, income_categories, group_accounts,
 				mobile_money_providers, sacco_branches, saccos, contribution_fine_rules, contribution_members,
 				contribution_schedules, contributions, memberships, group_roles, groups,

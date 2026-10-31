@@ -78,6 +78,67 @@ func AllAccountKindValues() []AccountKind {
 	}
 }
 
+type ApprovalDecision string
+
+const (
+	ApprovalDecisionPending  ApprovalDecision = "pending"
+	ApprovalDecisionApproved ApprovalDecision = "approved"
+	ApprovalDecisionDeclined ApprovalDecision = "declined"
+)
+
+func (e *ApprovalDecision) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ApprovalDecision(s)
+	case string:
+		*e = ApprovalDecision(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ApprovalDecision: %T", src)
+	}
+	return nil
+}
+
+type NullApprovalDecision struct {
+	ApprovalDecision ApprovalDecision
+	Valid            bool // Valid is true if ApprovalDecision is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullApprovalDecision) Scan(value interface{}) error {
+	if value == nil {
+		ns.ApprovalDecision, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ApprovalDecision.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullApprovalDecision) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ApprovalDecision), nil
+}
+
+func (e ApprovalDecision) Valid() bool {
+	switch e {
+	case ApprovalDecisionPending,
+		ApprovalDecisionApproved,
+		ApprovalDecisionDeclined:
+		return true
+	}
+	return false
+}
+
+func AllApprovalDecisionValues() []ApprovalDecision {
+	return []ApprovalDecision{
+		ApprovalDecisionPending,
+		ApprovalDecisionApproved,
+		ApprovalDecisionDeclined,
+	}
+}
+
 type ContributionCategory string
 
 const (
@@ -887,6 +948,76 @@ func AllWithdrawalKindValues() []WithdrawalKind {
 	}
 }
 
+type WithdrawalRequestStatus string
+
+const (
+	WithdrawalRequestStatusPending   WithdrawalRequestStatus = "pending"
+	WithdrawalRequestStatusApproved  WithdrawalRequestStatus = "approved"
+	WithdrawalRequestStatusDeclined  WithdrawalRequestStatus = "declined"
+	WithdrawalRequestStatusCancelled WithdrawalRequestStatus = "cancelled"
+	WithdrawalRequestStatusPaid      WithdrawalRequestStatus = "paid"
+	WithdrawalRequestStatusFailed    WithdrawalRequestStatus = "failed"
+)
+
+func (e *WithdrawalRequestStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = WithdrawalRequestStatus(s)
+	case string:
+		*e = WithdrawalRequestStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for WithdrawalRequestStatus: %T", src)
+	}
+	return nil
+}
+
+type NullWithdrawalRequestStatus struct {
+	WithdrawalRequestStatus WithdrawalRequestStatus
+	Valid                   bool // Valid is true if WithdrawalRequestStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullWithdrawalRequestStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.WithdrawalRequestStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.WithdrawalRequestStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullWithdrawalRequestStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.WithdrawalRequestStatus), nil
+}
+
+func (e WithdrawalRequestStatus) Valid() bool {
+	switch e {
+	case WithdrawalRequestStatusPending,
+		WithdrawalRequestStatusApproved,
+		WithdrawalRequestStatusDeclined,
+		WithdrawalRequestStatusCancelled,
+		WithdrawalRequestStatusPaid,
+		WithdrawalRequestStatusFailed:
+		return true
+	}
+	return false
+}
+
+func AllWithdrawalRequestStatusValues() []WithdrawalRequestStatus {
+	return []WithdrawalRequestStatus{
+		WithdrawalRequestStatusPending,
+		WithdrawalRequestStatusApproved,
+		WithdrawalRequestStatusDeclined,
+		WithdrawalRequestStatusCancelled,
+		WithdrawalRequestStatusPaid,
+		WithdrawalRequestStatusFailed,
+	}
+}
+
 type AccountEntry struct {
 	ID                int64
 	LegacyID          *int32
@@ -919,6 +1050,7 @@ type AccountTransfer struct {
 	CreatedBy     *int64
 	CreatedAt     time.Time
 	VoidedAt      *time.Time
+	VoidedBy      *int64
 }
 
 type AdminAuditLog struct {
@@ -1196,6 +1328,7 @@ type LedgerEntry struct {
 	IsBackdated    bool
 	DepositID      *int64
 	FineCategoryID *int64
+	WithdrawalID   *int64
 }
 
 type LedgerEntryRule struct {
@@ -1342,4 +1475,43 @@ type Withdrawal struct {
 	CreatedAt         time.Time
 	VoidedAt          *time.Time
 	VoidedBy          *int64
+}
+
+type WithdrawalApproval struct {
+	ID                  int64
+	LegacyID            *int32
+	GroupID             int64
+	WithdrawalRequestID int64
+	MembershipID        int64
+	Decision            ApprovalDecision
+	DecidedAt           *time.Time
+	Comment             string
+	DecidedBy           *int64
+	CreatedAt           time.Time
+}
+
+type WithdrawalRequest struct {
+	ID                int64
+	LegacyID          *int32
+	GroupID           int64
+	ReferenceNumber   string
+	Kind              WithdrawalKind
+	Status            WithdrawalRequestStatus
+	RequestedBy       *int64
+	AccountID         *int64
+	ToAccountID       *int64
+	Amount            pgtype.Numeric
+	Description       string
+	ExpenseCategoryID *int64
+	MembershipID      *int64
+	ContributionID    *int64
+	Recipient         []byte
+	DecidedAt         *time.Time
+	DeclineReason     string
+	WithdrawalID      *int64
+	AccountTransferID *int64
+	Refs              []byte
+	CreatedBy         *int64
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }

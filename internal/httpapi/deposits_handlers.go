@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -212,28 +213,12 @@ func (s *Server) checkDeposit(r *http.Request, q *store.Queries, groupID int64, 
 	if _, ok := recordableDeposits[kind]; !ok {
 		return store.GroupAccount{}, badRequest{"invalid_kind", "kind must be contribution, fine, misc or income."}
 	}
-	if req.Amount == nil || cents(string(*req.Amount)) <= 0 {
-		return store.GroupAccount{}, badRequest{"invalid_amount", "amount must be more than zero."}
+	if err := checkAmountDate(req.Amount, req.Date, req.Method, "deposit"); err != nil {
+		return store.GroupAccount{}, err
 	}
-	if req.Date == nil {
-		return store.GroupAccount{}, badRequest{"missing_fields", "date is required."}
-	}
-	y, m, d := time.Now().In(nairobi()).Date()
-	if req.Date.After(time.Date(y, m, d, 0, 0, 0, 0, time.UTC)) {
-		return store.GroupAccount{}, badRequest{"invalid_date", "A deposit cannot be dated in the future."}
-	}
-	if req.Method != nil && !store.PaymentMethod(*req.Method).Valid() {
-		return store.GroupAccount{}, badRequest{"invalid_method", "Unknown payment method."}
-	}
-	acct, err := q.GetGroupAccount(ctx, store.GetGroupAccountParams{GroupID: groupID, ID: req.AccountID})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return acct, badRequest{"invalid_account", "Pick one of the group's accounts."}
-	}
+	acct, err := openAccount(ctx, q, groupID, req.AccountID)
 	if err != nil {
 		return acct, err
-	}
-	if acct.IsClosed {
-		return acct, badRequest{"account_closed", "That account is closed."}
 	}
 	exists := func(f func() (bool, error), code, msg string) error {
 		ok, err := f()
@@ -298,6 +283,39 @@ func (s *Server) checkDeposit(r *http.Request, q *store.Queries, groupID int64, 
 		}, "invalid_depositor", "That depositor is not in this group."); err != nil {
 			return acct, err
 		}
+	}
+	return acct, nil
+}
+
+// checkAmountDate validates the fields every movement of money has.
+func checkAmountDate(amount *Amount, date *Date, method *string, noun string) error {
+	if amount == nil || cents(string(*amount)) <= 0 {
+		return badRequest{"invalid_amount", "amount must be more than zero."}
+	}
+	if date == nil {
+		return badRequest{"missing_fields", "date is required."}
+	}
+	y, m, d := time.Now().In(nairobi()).Date()
+	if date.After(time.Date(y, m, d, 0, 0, 0, 0, time.UTC)) {
+		return badRequest{"invalid_date", "A " + noun + " cannot be dated in the future."}
+	}
+	if method != nil && !store.PaymentMethod(*method).Valid() {
+		return badRequest{"invalid_method", "Unknown payment method."}
+	}
+	return nil
+}
+
+// openAccount loads one of the group's accounts that can take new entries.
+func openAccount(ctx context.Context, q *store.Queries, groupID, id int64) (store.GroupAccount, error) {
+	acct, err := q.GetGroupAccount(ctx, store.GetGroupAccountParams{GroupID: groupID, ID: id})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return acct, badRequest{"invalid_account", "Pick one of the group's accounts."}
+	}
+	if err != nil {
+		return acct, err
+	}
+	if acct.IsClosed {
+		return acct, badRequest{"account_closed", "That account is closed."}
 	}
 	return acct, nil
 }

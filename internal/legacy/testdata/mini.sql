@@ -85,3 +85,15 @@ INSERT INTO `transaction_statements` (`id`, `transaction_type`, `transaction_dat
 (702, 17, 1690700000, 0, 502, NULL, 15, 100, '50.00', 1, 1690700000),
 (703, 41, 1690800000, 'bank-1', NULL, 600, 15, NULL, '400.00', 1, 1690800000),
 (704, 41, 1690800000, 0, NULL, 600, 15, NULL, '9.00', 0, 1690800000);
+
+INSERT INTO `withdrawal_requests` (`id`, `request_date`, `withdrawal_for`, `group_id`, `member_id`, `recipient`, `recipient_member_id`, `recipient_phone_number`, `expense_category_id`, `contribution_id`, `loan_type_id`, `description`, `amount`, `active`, `status`, `is_approved`, `is_declined`, `created_on`, `created_by`, `modified_on`, `approved_on`, `declined_on`, `is_disbursed`, `is_disbursement_declined`, `decline_reason`, `reference_number`) VALUES
+(800, 1690900000, 1, 15, 100, 1, 0, '254712345678', NULL, NULL, NULL, 'Hall rent', '1500.00', 1, 2, '1', NULL, 1690900000, 10, 1690990000, '1690950000', NULL, '1', NULL, NULL, 'ABC123'),
+(801, 1690900000, 3, 15, 100, 1, 101, '254712000000', NULL, 44, NULL, 'Refund', '700.00', 1, 1, NULL, 1, 1690900000, 10, 1690990000, NULL, 1690960000, NULL, NULL, 'Not now', 'ABC124'),
+(802, 1690900000, 9, 15, 100, 1, 0, NULL, NULL, NULL, NULL, '', '10.00', 1, 0, NULL, NULL, 1690900000, 10, NULL, NULL, NULL, NULL, NULL, NULL, 'ABC125');
+
+INSERT INTO `withdrawal_approval_requests` (`id`, `group_id`, `member_id`, `withdrawal_request_id`, `is_approved`, `approved_on`, `is_declined`, `declined_on`, `comments`, `active`, `status`, `created_by`, `created_on`, `modified_by`) VALUES
+(900, 15, 100, 800, 1, 1690900000, 0, NULL, NULL, 1, 1, 10, 1690900000, NULL),
+(901, 15, 101, 800, 1, 1690950000, 0, NULL, NULL, 1, 1, 10, 1690900000, 11),
+(902, 15, 101, 801, 0, 1690960000, 1, 1690960000, 'Not now', 1, 1, 10, 1690900000, 11),
+(903, 15, 101, 801, 0, NULL, 0, NULL, NULL, 1, 0, 10, 1690900000, NULL),
+(904, 15, 100, 999, 0, NULL, 0, NULL, NULL, 1, 0, 10, 1690900000, NULL);

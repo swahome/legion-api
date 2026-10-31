@@ -249,6 +249,7 @@ func TestTransformMoney(t *testing.T) {
 	r := p.Report
 	for k, v := range map[string]int{
 		"group_accounts": 3, "fine_categories": 1, "deposits": 3, "withdrawals": 1, "account_entries": 5,
+		"withdrawal_requests": 2, "withdrawal_approvals": 3,
 	} {
 		if r.Imported[k] != v {
 			t.Errorf("%s: imported %d, want %d", k, r.Imported[k], v)
@@ -260,6 +261,10 @@ func TestTransformMoney(t *testing.T) {
 		"deposits: unknown type 99, skipped",
 		"deposits: account taken as the group's only account of that kind",
 		"deposits: account unknown (several accounts of that kind), kept without account",
+		"withdrawal_requests: unknown withdrawal_for 9, skipped",
+		"withdrawal_requests: group has no single bank account, kept without account",
+		"withdrawal_approvals: duplicate for the same member, skipped",
+		"withdrawal_approvals: request missing or in another group, skipped",
 	} {
 		if r.Issues[issue] == 0 {
 			t.Errorf("missing issue %q in %v", issue, r.Issues)
@@ -275,5 +280,18 @@ func TestTransformMoney(t *testing.T) {
 	}
 	if refs := string(p.Deposits[2][17].([]byte)); refs != `{"loan_id":31}` {
 		t.Errorf("deposit refs = %s", refs)
+	}
+	// Request 800 was paid out by the payment API; 801 was declined by a
+	// signatory and paid a member back from Monthly Savings.
+	paid, declined := p.WithdrawalRequests[0], p.WithdrawalRequests[1]
+	if paid[4] != "expense" || paid[5] != "paid" || string(paid[13].([]byte)) != `{"phone":"254712345678","type":"mobile"}` {
+		t.Errorf("request 800 = %v", paid)
+	}
+	if declined[4] != "contribution_refund" || declined[5] != "declined" || *declined[11].(*int64) != 101 ||
+		*declined[12].(*int64) != 44 || declined[15] != "Not now" {
+		t.Errorf("request 801 = %v", declined)
+	}
+	if a := p.WithdrawalApprovals[2]; a[5] != "declined" || a[7] != "Not now" || *a[8].(*int64) != 11 {
+		t.Errorf("approval 902 = %v", a)
 	}
 }

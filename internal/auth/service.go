@@ -129,6 +129,24 @@ func (s *Service) Authenticate(ctx context.Context, rawIdentity, password string
 	return user, nil
 }
 
+// ConfirmPassword re-checks a signed-in user's password before a sensitive
+// step, such as approving a withdrawal. Wrong guesses count towards the
+// same lockout as logins, keyed by the user.
+func (s *Service) ConfirmPassword(ctx context.Context, userID int64, password string, c ClientInfo) error {
+	key := fmt.Sprintf("user:%d", userID)
+	if err := s.checkThrottle(ctx, key, c.IP); err != nil {
+		return err
+	}
+	user, err := s.q.GetUserByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if user.PasswordHash == nil || bcrypt.CompareHashAndPassword([]byte(*user.PasswordHash), []byte(password)) != nil {
+		return s.failAttempt(ctx, key, c.IP)
+	}
+	return s.q.ClearLoginAttempts(ctx, store.ClearLoginAttemptsParams{Identity: key, IpAddress: c.IP})
+}
+
 // LookupIdentity finds the user for a phone number or email address.
 func (s *Service) LookupIdentity(ctx context.Context, id Identity) (store.User, error) {
 	return s.lookup(ctx, id)
