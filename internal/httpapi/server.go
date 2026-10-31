@@ -127,6 +127,7 @@ func (s *Server) Routes() http.Handler {
 				r.Post("/withdrawal-requests/{requestID}/decline", s.declineWithdrawalRequest)
 				r.Get("/fines", s.listFines)
 				r.Get("/fine-balances", s.fineBalances)
+				r.Get("/dashboard", s.groupDashboard)
 
 				r.Group(func(r chi.Router) {
 					r.Use(requireOfficial)

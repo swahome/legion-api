@@ -30,6 +30,7 @@ someone takes effect immediately, without waiting for their token to expire.
 | GET | `/contributions/{id}` | member | Includes the schedule, fine rules and member list (when it doesn't apply to everyone) |
 | POST | `/contributions` | official | `name`, `kind` (`regular`, `one_time` or `non_scheduled`), `amount`, optional `category`, `applies_to_all_members`, `member_ids`, `schedule`, `fine_rules`. Regular contributions need `schedule.frequency` and `schedule.contribution_date`. `schedule.invoice_date` defaults to `invoice_days_before` days before the contribution date |
 | PATCH | `/contributions/{id}` | official | Any field except `kind`. `schedule`, `member_ids` and `fine_rules` replace the existing ones when sent. A fine rule sent with its `id` is updated; rules left out are deleted |
+| GET | `/dashboard?months=` | member | The group home page (legacy group dashboard and mobile `get_group_dashboard_data`), see below |
 | GET | `/contribution-balances` | official | Every active member's payable, paid and balance, most in arrears first |
 
 ### Money (milestone 3)
@@ -80,6 +81,28 @@ Reference lists for opening accounts: `/v1/reference/banks` (and branches),
 `/v1/reference/saccos`, `/v1/reference/saccos/{id}/branches` and
 `/v1/reference/mobile-money-providers`. See `docs/schema/money.md` for the tables
 and the legacy type codes.
+
+### Dashboard
+
+`GET /dashboard` returns, as of today in the server's time zone (`as_of`):
+
+- `cash`: `at_bank` (bank and sacco accounts), `at_hand` (mobile money and petty
+  cash), `total`, `by_kind` balances and the number of open `accounts` per kind.
+  Legacy entries whose account is unknown count towards their kind.
+- `totals`: all-time `contributions`, `fines` and `misc` paid by members (from the
+  ledger), `income` and `expenses` (from deposits and withdrawals). Voided rows are
+  left out.
+- `months`: the same five figures per calendar month, for the last `months`
+  months including this one (default 12, at most 36). `years`: per calendar year
+  over the whole history, only years with activity.
+- `owed`: for `contributions`, `fines` and `misc`, what active members owe (the
+  sum of positive balances) and how many `members` owe it. `members_behind`
+  counts members who owe anything.
+- Officials also get `recent` (the latest 10 cash book movements: `date`,
+  `direction` in or out, `kind`, `amount`, `account`, `member`) and
+  `pending_withdrawal_requests`.
+
+Loan figures (the legacy `total_loan_balances` and friends) join in milestone 4.
 
 ## Conventions
 
