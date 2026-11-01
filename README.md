@@ -24,6 +24,9 @@ make run                 # API on :8080, applies migrations on start
 make test                # needs TEST_DATABASE_URL in .env
 ```
 
+On Windows, follow [docs/windows.md](docs/windows.md) instead: PowerShell steps
+with your own Go and PostgreSQL, no `make`, Docker or WSL.
+
 ## Build and deploy
 
 `make build` produces one static binary, `bin/legion-api`, with the migrations
@@ -36,6 +39,7 @@ the binary and a `.env` file to the server:
 ./legion-api create-user -phone 0700000001 -password ... -admin
 ./legion-api import-legacy -dump chamasoft.sql   # see docs/data/legacy-import.md
 ./legion-api billing-run [-date 2026-10-31]      # raise the day's invoices and fines by hand
+./legion-api hook-urls                           # addresses to give the banks and Chamasoft
 ./legion-api version
 ```
 
@@ -77,7 +81,7 @@ The legion-web README has a full Caddy example.
 ## Layout
 
 ```
-cmd/legion-api   the binary: serve, migrate, create-user, import-legacy, billing-run, version
+cmd/legion-api   the binary: serve, migrate, create-user, import-legacy, billing-run, hook-urls, version
 db/migrations    goose SQL migrations (embedded)
 db/queries       sqlc query files
 internal/auth    login, throttling, tokens, refresh rotation
@@ -88,6 +92,7 @@ internal/config  .env and environment settings
 internal/httpapi chi routes and handlers
 internal/legacy  MySQL dump reader and the legacy data import
 internal/mobile  the legacy-compatible mobile app API
+internal/payments MPesa payments (Chamasoft), bank feeds, transaction alerts and reconciliation
 internal/store   sqlc generated code (do not edit; run `make generate`)
 docs/            schema mapping and API notes
 ```
@@ -102,5 +107,6 @@ goose -dir db/migrations postgres "$DATABASE_URL" up
 
 Schema design and the legacy mapping for each slice are in `docs/schema/`.
 Auth behaviour is described in `docs/api/auth.md`, the group endpoints in
-`docs/api/groups.md`, the platform admin in `docs/api/admin.md`, and the legacy
+`docs/api/groups.md`, the platform admin in `docs/api/admin.md`, payments, bank feeds, reconciliation
+and the bank panel in `docs/api/payments.md`, and the legacy
 mobile app API in `docs/api/mobile.md`.

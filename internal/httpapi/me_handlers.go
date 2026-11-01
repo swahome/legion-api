@@ -57,6 +57,14 @@ type meResponse struct {
 	// DisabledMenus lists the menu items a platform admin switched off,
 	// like "group.arrears". The menus themselves are fixed in the web app.
 	DisabledMenus []string `json:"disabled_menus"`
+	// Banks are the bank panels the user works in (bank staff).
+	Banks []meBank `json:"banks"`
+}
+
+type meBank struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+	Role string `json:"role"`
 }
 
 // disabledMenusKey is the platform setting that holds the switched-off menus.
@@ -106,6 +114,15 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 			RoleName:     m.RoleName,
 			Status:       string(m.Status),
 		})
+	}
+	banks, err := s.q.UserBanks(ctx, uid)
+	if err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+	resp.Banks = make([]meBank, 0, len(banks))
+	for _, b := range banks {
+		resp.Banks = append(resp.Banks, meBank{ID: b.ID, Name: b.Name, Role: string(b.Role)})
 	}
 	resp.DisabledMenus = []string{}
 	if v, err := s.q.GetPlatformSetting(ctx, disabledMenusKey); err == nil {

@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 	_ "time/tzdata" // the binary carries its own time zone database
@@ -35,6 +36,7 @@ import (
 	"github.com/swahome/legion-api/internal/httpapi"
 	"github.com/swahome/legion-api/internal/legacy"
 	"github.com/swahome/legion-api/internal/mobile"
+	"github.com/swahome/legion-api/internal/payments"
 	"github.com/swahome/legion-api/internal/sms"
 	"github.com/swahome/legion-api/internal/store"
 )
@@ -63,8 +65,10 @@ func main() {
 		err = importLegacy(args)
 	case "billing-run":
 		err = billingRun(args)
+	case "hook-urls":
+		err = hookURLs()
 	default:
-		err = fmt.Errorf("unknown command %q (want serve, migrate, create-user, import-legacy, billing-run or version)", cmd)
+		err = fmt.Errorf("unknown command %q (want serve, migrate, create-user, import-legacy, billing-run, hook-urls or version)", cmd)
 	}
 	if err != nil {
 		slog.Error("fatal", "cmd", cmd, "err", err)
@@ -107,6 +111,38 @@ func serve() error {
 	go dispatcher.Run(ctx)
 	acct := &account.Service{WebURL: cfg.WebURL}
 	api := httpapi.New(pool, authSvc, cfg.CookieSecure).WithBilling(engine, cfg.Location).WithAccounts(acct, dispatcher.Kick)
+	pay := &payments.Service{Pool: pool, PublicURL: cfg.PublicURL, HookKey: cfg.HookKey,
+		DefaultCC: cfg.DefaultCallingCode, Location: cfg.Location, Log: slog.Default(), SMSKick: dispatcher.Kick}
+	switch {
+	case cfg.ChamasoftFake:
+		pay.Gateway = &payments.FakeGateway{Delay: 5 * time.Second, Settle: func(ref, receipt string) {
+			if _, _, err := pay.Settle(context.Background(), ref, payments.PaymentResult{
+				Success: true, Code: "200", Description: "Paid (test mode)", Receipt: receipt}); err != nil {
+				slog.Error("fake payment settle", "err", err)
+			}
+		}}
+		slog.Warn("payments: LEGION_CHAMASOFT_FAKE is on, MPesa payments are simulated")
+	case cfg.ChamasoftURL != "":
+		gw := &payments.Chamasoft{BaseURL: cfg.ChamasoftURL, BasicAuth: cfg.ChamasoftAuth}
+		if cfg.ChamasoftCert != "" {
+			if gw.PublicKey, err = payments.LoadPublicKey(cfg.ChamasoftCert); err != nil {
+				return fmt.Errorf("LEGION_CHAMASOFT_CERT: %w", err)
+			}
+		}
+		pay.Gateway = gw
+		slog.Info("payments via Chamasoft", "url", cfg.ChamasoftURL)
+	default:
+		slog.Warn("payments: LEGION_CHAMASOFT_URL not set, members cannot start MPesa payments")
+	}
+	if cfg.PublicURL == "" && pay.Gateway != nil {
+		return errors.New("payments need LEGION_PUBLIC_URL (or LEGION_WEB_URL) for the MPesa callback")
+	}
+	go pay.RunExpiry(ctx)
+	api.WithPayments(pay, httpapi.HookConfig{
+		Equity:          httpapi.HookAuth{Username: cfg.EquityUsername, Password: cfg.EquityPassword, IPs: cfg.EquityIPs},
+		Coop:            httpapi.HookAuth{Username: cfg.CoopUsername, Password: cfg.CoopPassword, IPs: cfg.CoopIPs},
+		ChamasoftDirect: httpapi.HookAuth{IPs: cfg.ChamasoftIPs},
+	})
 	if cfg.BillingAt != "off" {
 		at, err := billing.ParseClock(cfg.BillingAt)
 		if err != nil {
@@ -120,7 +156,7 @@ func serve() error {
 		if err != nil {
 			return err
 		}
-		api.WithMobile(mobile.New(pool, keys, authSvc, mobile.SMSOTP{Pool: pool, Kick: dispatcher.Kick}).WithAccounts(acct, dispatcher.Kick).Routes())
+		api.WithMobile(mobile.New(pool, keys, authSvc, mobile.SMSOTP{Pool: pool, Kick: dispatcher.Kick}).WithAccounts(acct, dispatcher.Kick).WithPayments(pay).Routes())
 		slog.Info("mobile app API on /v1/legacy")
 	}
 	srv := &http.Server{
@@ -337,4 +373,28 @@ func billingRun(args []string) error {
 	out, _ := json.MarshalIndent(sum, "", "  ")
 	fmt.Println(string(out))
 	return err
+}
+
+// hookURLs prints the addresses to give the banks and Chamasoft, with the
+// keys the API checks.
+func hookURLs() error {
+	if err := config.LoadEnvFile(); err != nil {
+		return err
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	if cfg.PublicURL == "" {
+		return errors.New("set LEGION_PUBLIC_URL (or LEGION_WEB_URL) first")
+	}
+	pay := &payments.Service{HookKey: cfg.HookKey}
+	base := strings.TrimRight(cfg.PublicURL, "/") + "/v1/hooks"
+	fmt.Printf("Equity Bank IPN:            %s/equity   (username and password in the body; LEGION_EQUITY_*)\n", base)
+	fmt.Printf("Co-op Bank IPN:             %s/coop     (basic auth or LEGION_COOP_IPS)\n", base)
+	fmt.Printf("Chamasoft direct paybill:   %s/chamasoft/direct?key=%s\n", base, pay.HookSecret("chamasoft_direct"))
+	fmt.Printf("MPesa C2B validation:       %s/mpesa/validation?key=%s\n", base, pay.HookSecret("mpesa"))
+	fmt.Printf("MPesa C2B confirmation:     %s/mpesa/confirmation?key=%s\n", base, pay.HookSecret("mpesa"))
+	fmt.Println("Chamasoft payment callbacks are signed per payment; nothing to configure.")
+	return nil
 }

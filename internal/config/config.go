@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -49,6 +50,32 @@ type Config struct {
 	ATUsername string
 	ATAPIKey   string
 	ATSenderID string
+
+	// Payments (milestone 6). PublicURL is where Chamasoft can call back,
+	// normally the site itself (LEGION_PUBLIC_URL, else LEGION_WEB_URL).
+	PublicURL      string
+	HookKey        []byte
+	ChamasoftURL   string
+	ChamasoftAuth  string
+	ChamasoftCert  string
+	ChamasoftFake  bool
+	ChamasoftIPs   []string
+	EquityUsername string
+	EquityPassword string
+	EquityIPs      []string
+	CoopUsername   string
+	CoopPassword   string
+	CoopIPs        []string
+}
+
+func list(key string) []string {
+	var out []string
+	for _, v := range strings.Split(os.Getenv(key), ",") {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // LoadEnvFile reads KEY=VALUE pairs from LEGION_ENV_FILE, or ./.env when
@@ -84,6 +111,18 @@ func Load() (Config, error) {
 		ATUsername:         os.Getenv("LEGION_AT_USERNAME"),
 		ATAPIKey:           os.Getenv("LEGION_AT_API_KEY"),
 		ATSenderID:         os.Getenv("LEGION_AT_SENDER_ID"),
+		PublicURL:          getenv("LEGION_PUBLIC_URL", os.Getenv("LEGION_WEB_URL")),
+		HookKey:            []byte(os.Getenv("LEGION_HOOK_KEY")),
+		ChamasoftURL:       os.Getenv("LEGION_CHAMASOFT_URL"),
+		ChamasoftAuth:      os.Getenv("LEGION_CHAMASOFT_AUTH"),
+		ChamasoftCert:      os.Getenv("LEGION_CHAMASOFT_CERT"),
+		ChamasoftIPs:       list("LEGION_CHAMASOFT_IPS"),
+		EquityUsername:     os.Getenv("LEGION_EQUITY_USERNAME"),
+		EquityPassword:     os.Getenv("LEGION_EQUITY_PASSWORD"),
+		EquityIPs:          list("LEGION_EQUITY_IPS"),
+		CoopUsername:       os.Getenv("LEGION_COOP_USERNAME"),
+		CoopPassword:       os.Getenv("LEGION_COOP_PASSWORD"),
+		CoopIPs:            list("LEGION_COOP_IPS"),
 	}
 	var err error
 	if c.AccessTTL, err = time.ParseDuration(getenv("LEGION_ACCESS_TTL", "15m")); err != nil {
@@ -100,6 +139,18 @@ func Load() (Config, error) {
 	}
 	if c.Location, err = time.LoadLocation(getenv("LEGION_TIMEZONE", "Africa/Nairobi")); err != nil {
 		return c, fmt.Errorf("LEGION_TIMEZONE: %w", err)
+	}
+	if c.ChamasoftFake, err = strconv.ParseBool(getenv("LEGION_CHAMASOFT_FAKE", "false")); err != nil {
+		return c, fmt.Errorf("LEGION_CHAMASOFT_FAKE: %w", err)
+	}
+	if len(c.HookKey) == 0 {
+		c.HookKey = c.JWTSecret
+	}
+	if c.ChamasoftURL != "" && c.ChamasoftAuth == "" {
+		return c, errors.New("LEGION_CHAMASOFT_URL needs LEGION_CHAMASOFT_AUTH (user:secret)")
+	}
+	if (c.EquityUsername == "") != (c.EquityPassword == "") || (c.CoopUsername == "") != (c.CoopPassword == "") {
+		return c, errors.New("set a bank feed's username and password together")
 	}
 	if c.DatabaseURL == "" {
 		return c, errors.New("DATABASE_URL is required")
