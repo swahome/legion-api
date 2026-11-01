@@ -47,7 +47,7 @@ used, as before.
 | Action | Notes |
 |---|---|
 | `mobile/login` | Phone or email and password. Uses the web login's throttle: 3 failures in 10 minutes lock that identity and IP |
-| `mobile/generate_pin`, `mobile/resend_pin` | Send a 4-digit PIN. No SMS sender is configured until milestone 5, so for now these answer "Error occured sending pin" |
+| `mobile/generate_pin`, `mobile/resend_pin` | Text a 4-digit PIN through the SMS outbox, with the app's SMS retriever signature |
 | `mobile/verify_pin` | Trades the PIN for a token. For a number with no account it returns `user_exists: 0` and the `unique_code` that sign-up needs |
 | `mobile/get_user_checkin_data` | The user and their groups, with role, activation status and currency |
 | `mobile/get_group_data` | The check-in data for one group |
@@ -106,8 +106,18 @@ used, as before.
 | `mobile/reports/bank_loans_summary` | One line per live bank loan and the footer totals. Arrears are the balances of loans past their end date |
 | `mobile/debtors/get_debtors_list` | Active debtors |
 | `mobile/debtor_loan_types/*` | The `loan_types` actions, on the loan types offered to debtors |
+| `mobile/register_user` | Sign-up after `verify_pin`: `first_name`, `last_name`, `identity`, `password` (8 or more), `unique_code`, optional `document_number`. Status 9 without a verified PIN. Signs the user in |
+| `mobile/forgot_password`, `validate_forgot_password_code`, `reset_password` | `phone` or `email`. A 4-digit code is texted; `validate_forgot_password_code` (`pin`) returns a `secret_key`, and `reset_password` (`secret_key`, `password`, `confirm_password`, with the same `phone` or `email`) sets the password and signs the user in |
+| `mobile/create_group` | `group_name`, optional `country_id`. The same group the web creates, in setup, with the caller as Chair Person. Returns the check-in data with `is_initiator` 1 |
+| `mobile/setup_tasks/add_group_members` | Officials only. An array of `{first_name, last_name, phone, email, group_role_id}`. Texted at once in a live group, when setup is complete otherwise |
+| `mobile/setup_tasks/create_group_contribution_setting`, `edit_contribution_setting` | Officials only. `name`, `amount`, `type` (1 regular, 2 one-time, 3 non-scheduled), `contribution_frequency` and the legacy day pickers, or `invoice_date` and `contribution_date` for one-time. Invoices go out 2 days before the due date, as before. Needs a `request_id`. Edit takes `id`; a contribution keeps its type |
+| `mobile/setup_tasks/contributing_members` | Officials only. `contribution_id`, `all_members` or `contributing_members` as `[{member_id}]` |
+| `mobile/setup_tasks/contribution_fine_settings` | Officials only. `contribution_id`, `enable_fines`, and the fine rows in the legacy fields. The rows replace the contribution's fines |
+| `mobile/setup_tasks/resend_group_invitation`, `members/send_invitation`, `setup_tasks/cancel_group_invitation`, `setup_tasks/reassign_member_group_role`, `members/reassign_member_group_role` | Officials only. Resend or cancel a member's invite; move a role to another member while the group is in setup |
+| `mobile/complete_group_setup` | Officials only. Optional `referral_code`. Makes the group live and texts the members added during setup |
+| `mobile/setup_tasks/index` | An empty task list. The old setup task tracker isn't carried over; the web's setup page replaces it |
 
-**Recording.** Every action that changes the books is for officials only (a group role or admin), with the legacy "For group admins only" answer. The old category and depositor actions let any member make changes; now only officials can. Payments go through the same code as the web, so a recorded deposit, its cash book entry and the member's ledger entry are written and voided together. Dates may be a unix time (seconds or milliseconds) or a date string read as PHP's `strtotime` read it (`05-10-2026` is 5 October, `10/05/2026` is 5 October too, month first). Amounts may carry commas. The app's payment method numbers map to Legion's methods; unknown numbers record no method. Validation failures answer "Form validation failed" with `validation_errors` on the field concerned. SMS and email receipts start with milestone 5.
+**Recording.** Every action that changes the books is for officials only (a group role or admin), with the legacy "For group admins only" answer. The old category and depositor actions let any member make changes; now only officials can. Payments go through the same code as the web, so a recorded deposit, its cash book entry and the member's ledger entry are written and voided together. Dates may be a unix time (seconds or milliseconds) or a date string read as PHP's `strtotime` read it (`05-10-2026` is 5 October, `10/05/2026` is 5 October too, month first). Amounts may carry commas. The app's payment method numbers map to Legion's methods; unknown numbers record no method. Validation failures answer "Form validation failed" with `validation_errors` on the field concerned. SMS and email receipts aren't sent yet.
 
 **Request ids.** The legacy list of recording actions (`deposits/record_*`, `withdrawals/record_*`, `invoices/create` and others as they are ported) needs a `request_id` of the form `<unix time>_<anything>`, sent today. Without one the answer is status 11 (update the app), with an old or malformed one status 13, and a repeat gets status 12 "Duplicate request", so a retried request is never recorded twice. These answers are never wrapped in `response`, as before. When the action fails (status 0) the id is released so the app can try again. Ids live in `mobile_request_ids` for three days.
 

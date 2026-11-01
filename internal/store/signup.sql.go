@@ -430,6 +430,22 @@ func (q *Queries) GetUserCodeByToken(ctx context.Context, tokenHash []byte) (Use
 	return i, err
 }
 
+const groupRoleInGroup = `-- name: GroupRoleInGroup :one
+SELECT EXISTS (SELECT 1 FROM group_roles WHERE group_id = $1 AND id = $2 AND is_active)
+`
+
+type GroupRoleInGroupParams struct {
+	GroupID int64
+	ID      int64
+}
+
+func (q *Queries) GroupRoleInGroup(ctx context.Context, arg GroupRoleInGroupParams) (bool, error) {
+	row := q.db.QueryRow(ctx, groupRoleInGroup, arg.GroupID, arg.ID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const listSMS = `-- name: ListSMS :many
 SELECT s.id, s.to_phone, s.body, s.kind, s.user_id, s.group_id, coalesce(g.name, '')::text AS group_name,
        s.status, s.attempts, s.provider_status, s.cost, s.error, s.created_at, s.sent_at
@@ -713,6 +729,74 @@ func (q *Queries) ResetUserPassword(ctx context.Context, arg ResetUserPasswordPa
 	return err
 }
 
+const roleHolder = `-- name: RoleHolder :one
+SELECT id FROM memberships WHERE group_id = $1 AND group_role_id = $2 AND status = 'active' LIMIT 1
+`
+
+type RoleHolderParams struct {
+	GroupID     int64
+	GroupRoleID *int64
+}
+
+// The active member holding a role, if any.
+func (q *Queries) RoleHolder(ctx context.Context, arg RoleHolderParams) (int64, error) {
+	row := q.db.QueryRow(ctx, roleHolder, arg.GroupID, arg.GroupRoleID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const setContributionFinesEnabled = `-- name: SetContributionFinesEnabled :execrows
+UPDATE contribution_schedules SET fines_enabled = $2, updated_at = now() WHERE contribution_id = $1
+`
+
+type SetContributionFinesEnabledParams struct {
+	ContributionID int64
+	FinesEnabled   bool
+}
+
+func (q *Queries) SetContributionFinesEnabled(ctx context.Context, arg SetContributionFinesEnabledParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setContributionFinesEnabled, arg.ContributionID, arg.FinesEnabled)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setContributionSchedulePicker = `-- name: SetContributionSchedulePicker :exec
+UPDATE contribution_schedules SET disable_overpayments = $2, sms_template = coalesce($3, sms_template),
+    updated_at = now()
+WHERE contribution_id = $1
+`
+
+type SetContributionSchedulePickerParams struct {
+	ContributionID      int64
+	DisableOverpayments bool
+	SmsTemplate         *string
+}
+
+// The app's extra schedule switches, kept with the legacy names.
+func (q *Queries) SetContributionSchedulePicker(ctx context.Context, arg SetContributionSchedulePickerParams) error {
+	_, err := q.db.Exec(ctx, setContributionSchedulePicker, arg.ContributionID, arg.DisableOverpayments, arg.SmsTemplate)
+	return err
+}
+
+const setGroupSetting = `-- name: SetGroupSetting :exec
+UPDATE groups SET settings = settings || jsonb_build_object($1::text, $2::text), updated_at = now()
+WHERE id = $3
+`
+
+type SetGroupSettingParams struct {
+	Key   string
+	Value string
+	ID    int64
+}
+
+func (q *Queries) SetGroupSetting(ctx context.Context, arg SetGroupSettingParams) error {
+	_, err := q.db.Exec(ctx, setGroupSetting, arg.Key, arg.Value, arg.ID)
+	return err
+}
+
 const setUserCodeToken = `-- name: SetUserCodeToken :exec
 UPDATE user_codes SET token_hash = $3 WHERE user_id = $1 AND purpose = $2
 `
@@ -725,6 +809,20 @@ type SetUserCodeTokenParams struct {
 
 func (q *Queries) SetUserCodeToken(ctx context.Context, arg SetUserCodeTokenParams) error {
 	_, err := q.db.Exec(ctx, setUserCodeToken, arg.UserID, arg.Purpose, arg.TokenHash)
+	return err
+}
+
+const setUserIDNumber = `-- name: SetUserIDNumber :exec
+UPDATE users SET id_number = $2, updated_at = now() WHERE id = $1
+`
+
+type SetUserIDNumberParams struct {
+	ID       int64
+	IDNumber *string
+}
+
+func (q *Queries) SetUserIDNumber(ctx context.Context, arg SetUserIDNumberParams) error {
+	_, err := q.db.Exec(ctx, setUserIDNumber, arg.ID, arg.IDNumber)
 	return err
 }
 

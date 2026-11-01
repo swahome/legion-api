@@ -33,6 +33,22 @@ someone takes effect immediately, without waiting for their token to expire.
 | GET | `/dashboard?months=` | member | The group home page (legacy group dashboard and mobile `get_group_dashboard_data`), see below |
 | GET | `/contribution-balances` | official | Every active member's payable, paid and balance, most in arrears first |
 
+### Creating a group and the setup wizard (milestone 5)
+
+| Method | Path | Who | Notes |
+|---|---|---|---|
+| POST | `/v1/groups` | signed in, phone verified | `name`, optional `country_code` (default country), `currency` (the country's), `email`, `phone`, `size`, `type`. Creates the group in status `setup` with the caller as Chair Person, the four default roles, a "Cash at Hand" petty cash account and the legacy default income, expense and fine categories. 201 `{group, membership_id}`. 403 `phone_not_verified` |
+| GET | `/v1/group-types` | signed in | The legacy group types (Chama, Investment club, ...) |
+| PATCH | `/` | official | `name`, `email`, `phone`, `address`, `size`, `type`, and while in setup `country_code` and `currency` (409 `currency_locked` once live) |
+| GET | `/setup` | official | The wizard's progress: `steps` (`details`, `members`, `contributions`, `fines`, `accounts`, `loan_types`) with `done` and `count`, `members_to_invite`, `completed_at` |
+| POST | `/setup/complete` | official | Makes the group live and texts everyone added during setup. Returns `{group, invites_sent}`. 409 `setup_complete` |
+| POST | `/members/{id}/invite` | official | Texts the member again. 409 `group_in_setup`, 400 `no_phone`. 202 |
+
+Members, contributions, fines, accounts and loan types are added with the same
+endpoints as in a live group. Nobody is texted while the group is in setup.
+`POST /members` takes `send_invite` (default true) for live groups. Groups in
+setup aren't billed.
+
 ### Money (milestone 3)
 
 | Method | Path | Who | Notes |

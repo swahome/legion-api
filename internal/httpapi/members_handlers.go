@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/swahome/legion-api/internal/account"
 	"github.com/swahome/legion-api/internal/auth"
 	"github.com/swahome/legion-api/internal/store"
 )
@@ -297,30 +298,13 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 }
 
 var (
-	errAlreadyMember = errors.New("already a member")
+	errAlreadyMember = account.ErrAlreadyMember
 	errLastOfficial  = errors.New("last official")
-	errEmailTaken    = errors.New("email belongs to another user")
+	errEmailTaken    = account.ErrEmailTaken
 )
 
 func (s *Server) findOrCreateUser(ctx context.Context, q *store.Queries, first, last, phone string, email *string) (int64, error) {
-	u, err := q.GetUserByPhone(ctx, &phone)
-	if err == nil {
-		return u.ID, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return 0, err
-	}
-	if email != nil {
-		if _, err := q.GetUserByEmail(ctx, *email); err == nil {
-			// A different person (different phone) already uses this email.
-			return 0, errEmailTaken
-		} else if !errors.Is(err, pgx.ErrNoRows) {
-			return 0, err
-		}
-	}
-	return q.CreateUserWithoutPassword(ctx, store.CreateUserWithoutPasswordParams{
-		FirstName: first, LastName: last, Phone: &phone, Email: email,
-	})
+	return account.FindOrCreateUser(ctx, q, first, last, phone, email)
 }
 
 type updateMemberRequest struct {

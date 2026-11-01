@@ -179,3 +179,26 @@ RETURNING id;
 
 -- name: MarkMemberInvitedByUser :exec
 UPDATE memberships SET invited_at = coalesce(invited_at, now()) WHERE group_id = $1 AND user_id = $2;
+
+-- name: SetUserIDNumber :exec
+UPDATE users SET id_number = $2, updated_at = now() WHERE id = $1;
+
+-- name: RoleHolder :one
+-- The active member holding a role, if any.
+SELECT id FROM memberships WHERE group_id = $1 AND group_role_id = $2 AND status = 'active' LIMIT 1;
+
+-- name: GroupRoleInGroup :one
+SELECT EXISTS (SELECT 1 FROM group_roles WHERE group_id = $1 AND id = $2 AND is_active);
+
+-- name: SetGroupSetting :exec
+UPDATE groups SET settings = settings || jsonb_build_object(sqlc.arg(key)::text, sqlc.arg(value)::text), updated_at = now()
+WHERE id = sqlc.arg(id);
+
+-- name: SetContributionSchedulePicker :exec
+-- The app's extra schedule switches, kept with the legacy names.
+UPDATE contribution_schedules SET disable_overpayments = $2, sms_template = coalesce(sqlc.narg(sms_template), sms_template),
+    updated_at = now()
+WHERE contribution_id = $1;
+
+-- name: SetContributionFinesEnabled :execrows
+UPDATE contribution_schedules SET fines_enabled = $2, updated_at = now() WHERE contribution_id = $1;

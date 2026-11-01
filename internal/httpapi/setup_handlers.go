@@ -29,7 +29,7 @@ type groupDetailsRequest struct {
 	Phone       *string `json:"phone"`
 	Address     *string `json:"address"`
 	Size        *int    `json:"size"`
-	Type        *string `json:"type"` // a key of GET /v1/groups/types
+	Type        *string `json:"type"` // a key of GET /v1/group-types
 }
 
 type groupDetails struct {

@@ -9,6 +9,13 @@
 | POST | `/v1/auth/logout` | refresh cookie | Revokes the session (the whole refresh token family) |
 | GET | `/v1/me` | Bearer | User, platform roles, group memberships (the group switcher) and the menus an admin switched off |
 | GET | `/healthz` | none | Database ping |
+| POST | `/v1/auth/signup` | none | `first_name`, `last_name`, `phone`, optional `email`, `password` (8 or more characters). 201 with a session, and a 6-digit code is texted to the phone. 409 `phone_taken` or `email_taken` |
+| POST | `/v1/auth/verify-phone` | Bearer | `{"code": "123456"}`. Marks the phone verified. A group can only be created once it is |
+| POST | `/v1/auth/verify-phone/resend` | Bearer | Texts a new code. 409 `already_verified` |
+| POST | `/v1/auth/forgot-password` | none | `{"identity": "<phone or email>"}`. Always 202, so accounts can't be probed. A 6-digit code goes to the account's phone (email delivery isn't built) |
+| POST | `/v1/auth/reset-password` | none | `identity`, `code`, `password`. Sets the password, marks the phone verified, signs out every other session and app, and returns a session |
+| GET | `/v1/auth/invites/{token}` | none | The invite a member was texted: `first_name`, `group_name`, `invited_by`, `needs_password`. 410 `invite_expired` |
+| POST | `/v1/auth/invites/{token}` | none | `{"password": "..."}`. Sets the invited member's password and returns a session. 409 `password_already_set` |
 
 Login and refresh both return:
 
@@ -29,6 +36,8 @@ Errors always look like `{"error": {"code": "...", "message": "..."}}`.
 | 403 | `password_reset_required` | Legacy account whose password hash we can't verify |
 | 403 | `account_inactive` | Deactivated user (only after the password checks out) |
 | 429 | `too_many_attempts` | Throttled; see `Retry-After` |
+| 400 | `invalid_code`, `code_expired` | Wrong or expired SMS code. A code lasts 15 minutes and allows 5 tries |
+| 429 | `too_many_codes` | More than 5 codes texted to one account in an hour |
 
 ## Behaviour carried over from the legacy app
 
@@ -58,7 +67,20 @@ Errors always look like `{"error": {"code": "...", "message": "..."}}`.
 - `middleware.RealIP` trusts `X-Forwarded-For`, so the API must sit behind a proxy
   that sets it. Otherwise clients could dodge the IP part of throttling.
 
-## Not yet built
+## Codes and invites
 
-- Password reset (the legacy app uses an SMS OTP). Accounts flagged
-  `password_reset_required` can't log in until it exists.
+- **SMS codes** are 6 digits on the web and 4 in the app, stored as an HMAC, one live
+  code per account and purpose (verify phone, reset password). Sending a new one
+  replaces the old. The texts are the legacy wording ("kindly use 123456 as the
+  activation code").
+- **Invites** are texted when an official adds someone to a live group, or to
+  everyone added during setup when setup is complete. Someone with no password gets
+  a link to `${LEGION_WEB_URL}/join/<token>`, valid for 30 days; someone who already
+  has a password gets the login address. Accepting an invite also verifies the phone.
+- Accounts flagged `password_reset_required` by the import get back in through
+  forgot-password.
+- The old API's `signup`, `new_signup`, `activate`, `resend_activation_code`,
+  `new_forgot_password` and `new_reset_password` actions (the unencrypted
+  `response_code` style ones) aren't carried over. The mobile app uses
+  `register_user`, `forgot_password`, `validate_forgot_password_code` and
+  `reset_password`, which are.
