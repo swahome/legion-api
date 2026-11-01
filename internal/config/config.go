@@ -66,6 +66,11 @@ type Config struct {
 	CoopUsername   string
 	CoopPassword   string
 	CoopIPs        []string
+
+	// USSD and WhatsApp (milestone 7).
+	USSDIPs     []string
+	TwilioToken string
+	Brand       string
 }
 
 func list(key string) []string {
@@ -123,6 +128,9 @@ func Load() (Config, error) {
 		CoopUsername:       os.Getenv("LEGION_COOP_USERNAME"),
 		CoopPassword:       os.Getenv("LEGION_COOP_PASSWORD"),
 		CoopIPs:            list("LEGION_COOP_IPS"),
+		USSDIPs:            list("LEGION_USSD_IPS"),
+		TwilioToken:        os.Getenv("LEGION_TWILIO_AUTH_TOKEN"),
+		Brand:              getenv("LEGION_BRAND", "Legion"),
 	}
 	var err error
 	if c.AccessTTL, err = time.ParseDuration(getenv("LEGION_ACCESS_TTL", "15m")); err != nil {

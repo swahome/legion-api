@@ -2,4 +2,4 @@
 .env
 *.test
 coverage.out
-*.sql
+/*.sql

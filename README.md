@@ -93,6 +93,7 @@ internal/httpapi chi routes and handlers
 internal/legacy  MySQL dump reader and the legacy data import
 internal/mobile  the legacy-compatible mobile app API
 internal/payments MPesa payments (Chamasoft), bank feeds, transaction alerts and reconciliation
+internal/channels the USSD and WhatsApp menus
 internal/store   sqlc generated code (do not edit; run `make generate`)
 docs/            schema mapping and API notes
 ```
@@ -108,5 +109,5 @@ goose -dir db/migrations postgres "$DATABASE_URL" up
 Schema design and the legacy mapping for each slice are in `docs/schema/`.
 Auth behaviour is described in `docs/api/auth.md`, the group endpoints in
 `docs/api/groups.md`, the platform admin in `docs/api/admin.md`, payments, bank feeds, reconciliation
-and the bank panel in `docs/api/payments.md`, and the legacy
-mobile app API in `docs/api/mobile.md`.
+and the bank panel in `docs/api/payments.md`, USSD and WhatsApp in `docs/api/channels.md`,
+and the legacy mobile app API in `docs/api/mobile.md`.
