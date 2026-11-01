@@ -31,6 +31,7 @@ import (
 	"github.com/swahome/legion-api/internal/account"
 	"github.com/swahome/legion-api/internal/auth"
 	"github.com/swahome/legion-api/internal/billing"
+	"github.com/swahome/legion-api/internal/channels"
 	"github.com/swahome/legion-api/internal/config"
 	"github.com/swahome/legion-api/internal/database"
 	"github.com/swahome/legion-api/internal/httpapi"
@@ -143,6 +144,11 @@ func serve() error {
 		Coop:            httpapi.HookAuth{Username: cfg.CoopUsername, Password: cfg.CoopPassword, IPs: cfg.CoopIPs},
 		ChamasoftDirect: httpapi.HookAuth{IPs: cfg.ChamasoftIPs},
 	})
+	chans := &channels.Engine{Pool: pool, Payments: pay, DefaultCC: cfg.DefaultCallingCode, Brand: cfg.Brand,
+		WebURL: cfg.WebURL, Log: slog.Default()}
+	go chans.RunCleanup(ctx, 180*24*time.Hour)
+	api.WithChannels(chans, httpapi.ChannelConfig{HookKey: cfg.HookKey, USSDIPs: cfg.USSDIPs,
+		TwilioToken: cfg.TwilioToken, PublicURL: cfg.PublicURL})
 	if cfg.BillingAt != "off" {
 		at, err := billing.ParseClock(cfg.BillingAt)
 		if err != nil {
@@ -396,5 +402,7 @@ func hookURLs() error {
 	fmt.Printf("MPesa C2B validation:       %s/mpesa/validation?key=%s\n", base, pay.HookSecret("mpesa"))
 	fmt.Printf("MPesa C2B confirmation:     %s/mpesa/confirmation?key=%s\n", base, pay.HookSecret("mpesa"))
 	fmt.Println("Chamasoft payment callbacks are signed per payment; nothing to configure.")
+	fmt.Printf("USSD (Africa's Talking):    %s/ussd?key=%s\n", base, httpapi.ChannelHookKey(cfg.HookKey, "ussd"))
+	fmt.Printf("WhatsApp (Twilio):          %s/whatsapp?key=%s\n", base, httpapi.ChannelHookKey(cfg.HookKey, "whatsapp"))
 	return nil
 }

@@ -64,6 +64,8 @@ func (s *Server) hookRoutes(r chi.Router) {
 	r.Post("/chamasoft/direct", s.chamasoftDirectHook)
 	r.Post("/mpesa/validation", s.mpesaValidationHook)
 	r.Post("/mpesa/confirmation", s.mpesaConfirmationHook)
+	r.Post("/ussd", s.ussdHook)
+	r.Post("/whatsapp", s.whatsappHook)
 }
 
 func remoteIP(r *http.Request) string {

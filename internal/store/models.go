@@ -258,6 +258,67 @@ func AllBankUserRoleValues() []BankUserRole {
 	}
 }
 
+type ChannelKind string
+
+const (
+	ChannelKindUssd     ChannelKind = "ussd"
+	ChannelKindWhatsapp ChannelKind = "whatsapp"
+	ChannelKindTest     ChannelKind = "test"
+)
+
+func (e *ChannelKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ChannelKind(s)
+	case string:
+		*e = ChannelKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ChannelKind: %T", src)
+	}
+	return nil
+}
+
+type NullChannelKind struct {
+	ChannelKind ChannelKind
+	Valid       bool // Valid is true if ChannelKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullChannelKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.ChannelKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ChannelKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullChannelKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ChannelKind), nil
+}
+
+func (e ChannelKind) Valid() bool {
+	switch e {
+	case ChannelKindUssd,
+		ChannelKindWhatsapp,
+		ChannelKindTest:
+		return true
+	}
+	return false
+}
+
+func AllChannelKindValues() []ChannelKind {
+	return []ChannelKind{
+		ChannelKindUssd,
+		ChannelKindWhatsapp,
+		ChannelKindTest,
+	}
+}
+
 type ContributionCategory string
 
 const (
@@ -1746,6 +1807,34 @@ type BankUser struct {
 	Role      BankUserRole
 	CreatedBy *int64
 	CreatedAt time.Time
+}
+
+type ChannelMessage struct {
+	ID        int64
+	SessionID int64
+	Input     string
+	Response  string
+	Error     string
+	CreatedAt time.Time
+}
+
+type ChannelSession struct {
+	ID           int64
+	Channel      ChannelKind
+	SessionKey   string
+	Phone        string
+	UserID       *int64
+	GroupID      *int64
+	ServiceCode  string
+	State        []byte
+	Steps        int32
+	LastRequest  string
+	LastResponse string
+	Inputs       int32
+	EndedAt      *time.Time
+	ExpiresAt    time.Time
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 type Contribution struct {

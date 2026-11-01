@@ -14,6 +14,7 @@ import (
 	"github.com/swahome/legion-api/internal/account"
 	"github.com/swahome/legion-api/internal/auth"
 	"github.com/swahome/legion-api/internal/billing"
+	"github.com/swahome/legion-api/internal/channels"
 	"github.com/swahome/legion-api/internal/payments"
 	"github.com/swahome/legion-api/internal/store"
 )
@@ -31,6 +32,8 @@ type Server struct {
 	smsKick            func()
 	payments           *payments.Service
 	hooks              HookConfig
+	channels           *channels.Engine
+	channelCfg         ChannelConfig
 }
 
 func New(pool *pgxpool.Pool, authSvc *auth.Service, cookieSecure bool) *Server {
@@ -135,6 +138,10 @@ func (s *Server) Routes() http.Handler {
 				r.Post("/transaction-alerts/{alertID}/assign", s.adminAssignAlert)
 				r.Get("/payments", s.adminListPayments)
 				r.Get("/webhooks", s.adminListWebhooks)
+				r.Get("/channels", s.adminChannels)
+				r.Post("/channels/try", s.adminTryChannel)
+				r.Get("/channel-sessions", s.adminListChannelSessions)
+				r.Get("/channel-sessions/{sessionID}", s.adminGetChannelSession)
 			})
 
 			r.Route("/bank", s.bankRoutes)
