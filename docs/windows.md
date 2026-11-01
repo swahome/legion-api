@@ -1,35 +1,21 @@
 # Running legion-api on Windows
 
-These steps build and run the API on Windows 10 or 11 with PowerShell. Nothing
-here needs Docker, WSL or `make`: the API is one `.exe` plus a `.env` file.
+These steps build and run the API on Windows with PowerShell, using the Go and
+PostgreSQL you already have. Nothing here needs Docker, WSL, winget or `make`:
+the API is one `.exe` plus a `.env` file.
 
-## 1. Install Go, PostgreSQL and Git
+## 1. What you need
 
-Open PowerShell and run:
-
-```powershell
-winget install --id GoLang.Go
-winget install --id PostgreSQL.PostgreSQL.16
-winget install --id Git.Git
-```
-
-The PostgreSQL installer asks for a password for the `postgres` superuser.
-Write it down; you need it in step 2. Keep the default port, 5432.
-
-**Close PowerShell and open a new window** so the new `PATH` is picked up, then
-check:
+Go (at least the version in `go.mod`) and PostgreSQL, both already installed and
+on `PATH`. Check in PowerShell:
 
 ```powershell
-go version        # must be at least the version in go.mod (1.26)
-git --version
+go version
+psql --version
 ```
 
-The PostgreSQL tools are not put on `PATH` by the installer. Either call them by
-their full path, as below, or add the folder for this session:
-
-```powershell
-$env:Path += ";C:\Program Files\PostgreSQL\16\bin"
-```
+If you already have a `legion` database (for example one you restored from a
+dump), skip step 2.
 
 ## 2. Create the database
 
@@ -159,9 +145,8 @@ tests are skipped.
 
 - **`curl` is not curl** in Windows PowerShell 5.1; it is an alias for
   `Invoke-WebRequest`. Type `curl.exe`.
-- **"go is not recognized"** or **"psql is not recognized"**: open a new
-  PowerShell window after installing, or add `C:\Program Files\PostgreSQL\16\bin`
-  to `PATH` as in step 1.
+- **"psql is not recognized"**: the PostgreSQL `bin` folder isn't on `PATH`.
+  Call it by full path, e.g. `& "C:\Program Files\PostgreSQL\16\bin\psql.exe"`.
 - **Firewall prompt**: with `LEGION_ADDR=127.0.0.1:8089` the API only listens on
   loopback and Windows doesn't ask. If you set `:8089` it listens on every
   network card and the firewall prompt appears; keep loopback unless another

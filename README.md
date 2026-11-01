@@ -25,7 +25,7 @@ make test                # needs TEST_DATABASE_URL in .env
 ```
 
 On Windows, follow [docs/windows.md](docs/windows.md) instead: PowerShell steps
-with no `make`, Docker or WSL.
+with your own Go and PostgreSQL, no `make`, Docker or WSL.
 
 ## Build and deploy
 
