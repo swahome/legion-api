@@ -24,6 +24,9 @@ make run                 # API on :8080, applies migrations on start
 make test                # needs TEST_DATABASE_URL in .env
 ```
 
+On Windows, follow [docs/windows.md](docs/windows.md) instead: PowerShell steps
+with no `make`, Docker or WSL.
+
 ## Build and deploy
 
 `make build` produces one static binary, `bin/legion-api`, with the migrations
