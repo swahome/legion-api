@@ -588,7 +588,7 @@ func writeDeposit(ctx context.Context, q *store.Queries, acct store.GroupAccount
 	amount string, date time.Time, description string, memberID *int64, userID int64) (int64, error) {
 	p := store.CreateDepositParams{
 		GroupID: acct.GroupID, AccountID: &acct.ID, AccountKind: acct.Kind, Kind: kind, MembershipID: memberID,
-		Amount: numeric(amount), DepositDate: date, Description: description, CreatedBy: &userID,
+		Amount: numeric(amount), DepositDate: date, Description: description, CreatedBy: By(userID),
 	}
 	if method != nil {
 		p.Method = store.NullPaymentMethod{PaymentMethod: store.PaymentMethod(*method), Valid: true}
@@ -659,7 +659,7 @@ func RecordRepayment(ctx context.Context, q *store.Queries, groupID, userID, loa
 	}
 	p := store.CreateLoanRepaymentParams{
 		GroupID: groupID, LoanID: loanID, MembershipID: l.MembershipID, DepositID: &did, AccountID: &acct.ID,
-		PaidOn: *r.Date, Source: "deposit", Description: desc, CreatedBy: &userID, Amount: numeric(r.Amount),
+		PaidOn: *r.Date, Source: "deposit", Description: desc, CreatedBy: By(userID), Amount: numeric(r.Amount),
 	}
 	if r.Method != nil {
 		p.Method = store.NullPaymentMethod{PaymentMethod: store.PaymentMethod(*r.Method), Valid: true}

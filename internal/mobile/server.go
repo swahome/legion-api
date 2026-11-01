@@ -20,6 +20,7 @@ import (
 
 	"github.com/swahome/legion-api/internal/account"
 	"github.com/swahome/legion-api/internal/auth"
+	"github.com/swahome/legion-api/internal/payments"
 	"github.com/swahome/legion-api/internal/store"
 )
 
@@ -44,6 +45,7 @@ type Server struct {
 	otp     OTPSender
 	acct    *account.Service
 	smsKick func()
+	pay     *payments.Service
 	now     func() time.Time
 	actions map[string]action
 }
@@ -224,6 +226,16 @@ func New(pool *pgxpool.Pool, keys *Keys, authSvc *auth.Service, otp OTPSender) *
 		"setup_tasks/edit_contribution_setting":         {fn: s.groupAction(6, s.officialsOnly(s.editContributionSetting))},
 		"setup_tasks/contributing_members":              {fn: s.groupAction(6, s.officialsOnly(s.contributingMembers))},
 		"setup_tasks/contribution_fine_settings":        {fn: s.groupAction(6, s.officialsOnly(s.contributionFineSettings))},
+
+		// MPesa payments and bank transaction alerts (milestone 6).
+		"transaction_alerts/get_group_unreconcilled_deposits":    {fn: s.groupAction(6, s.unreconciledAlerts(1))},
+		"transaction_alerts/get_group_unreconcilled_withdrawals": {fn: s.groupAction(6, s.unreconciledAlerts(-1))},
+		"transaction_alerts/reconcile_deposits":                  {fn: s.groupAction(6, s.reconcileAlert(true))},
+		"transaction_alerts/reconcile_withdrawals":               {fn: s.groupAction(6, s.reconcileAlert(false))},
+		"transaction_alerts/payment_request":                     {fn: s.groupAction(6, s.paymentRequest)},
+		"deposits/make_new_group_payment":                        {fn: s.groupAction(6, s.makeGroupPayment)},
+		"deposits/make_payment_to_group_bank_express":            {fn: s.groupAction(6, s.makeGroupPayment)},
+		"deposits/make_group_arrears_payment":                    {fn: s.groupAction(6, s.makeArrearsPayment)},
 	}
 	// debtor_loan_types/* are the loan_types actions on the types offered to
 	// debtors (the legacy controllers were copies of each other).
@@ -339,6 +351,9 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		requestID = c.req.Str("request_id")
+	}
+	if c.req.Str("user_id") == "" && c.req.Str("current_user_id") != "" {
+		c.req["user_id"] = c.req["current_user_id"] // transaction_alerts/payment_request names it so
 	}
 	if c.userID != 0 && c.req.Int("user_id") != c.userID {
 		out.send(http.StatusOK, status(400, "user Authentication token is invalid."))

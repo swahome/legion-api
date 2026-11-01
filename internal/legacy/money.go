@@ -177,7 +177,7 @@ var AccountCols = []string{"id", "legacy_id", "group_id", "kind", "name", "accou
 var accountColumnsUsed = set("id", "group_id", "account_name", "account_number", "bank_id", "bank_branch_id",
 	"sacco_id", "sacco_branch_id", "mobile_money_provider_id", "initial_balance", "current_balance", "is_default",
 	"is_verified", "is_closed", "is_deleted", "active", "created_by", "created_on", "modified_by", "modified_on",
-	"account_password", "account_slug", "old_id", "is_system")
+	"account_slug", "old_id", "is_system")
 
 type refSets struct {
 	groups, users, banks, branches, saccos, saccoBranches, providers map[int64]bool

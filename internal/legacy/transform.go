@@ -28,6 +28,7 @@ var DumpTables = []string{
 	"loan_types", "loans", "loan_invoices", "loan_repayments", "loan_guarantors",
 	"debtors", "bank_loans", "debtor_loan_types", "debtor_loans", "debtor_loan_invoices",
 	"debtor_loan_repayments", "debtor_loan_guarantors",
+	"transaction_alerts", "online_payment_requests", "user_bank_pairings", "bank_user_role_pairings",
 }
 
 // Options control how legacy values are mapped.
@@ -53,6 +54,7 @@ type Plan struct {
 	WithdrawalRequests, WithdrawalApprovals                          [][]any
 	LoanTypes, Loans, LoanCharges, LoanRepayments, LoanGuarantors    [][]any
 	Debtors, BankLoans                                               [][]any
+	TransactionAlerts, PaymentRequests, BankUsers                    [][]any
 
 	Report Report
 }
@@ -194,6 +196,9 @@ func Transform(t Tables, roles []Row, opt Options, now time.Time) (*Plan, error)
 	requests := p.withdrawalRequests(t["withdrawal_requests"], ref, accounts, expense, now)
 	p.withdrawalApprovals(t["withdrawal_approval_requests"], ref, requests, now)
 	p.ledger(t["statements"], groups, members, contribs, deposits, fines, now)
+	alerts := p.transactionAlerts(t["transaction_alerts"], ref, accounts, now)
+	p.paymentRequests(t["online_payment_requests"], ref, accounts, fines, loanSet, alerts, opt, now)
+	p.bankUsers(t["user_bank_pairings"], t["bank_user_role_pairings"], ref, now)
 	p.settings(t["settings"])
 	p.mobileTokens(t["user_pin_access_token"], users, now)
 
@@ -214,6 +219,7 @@ func Transform(t Tables, roles []Row, opt Options, now time.Time) (*Plan, error)
 		"loan_types": p.LoanTypes, "loans": p.Loans, "loan_charges": p.LoanCharges,
 		"loan_repayments": p.LoanRepayments, "loan_guarantors": p.LoanGuarantors,
 		"debtors": p.Debtors, "bank_loans": p.BankLoans,
+		"transaction_alerts": p.TransactionAlerts, "payment_requests": p.PaymentRequests, "bank_users": p.BankUsers,
 	} {
 		p.Report.Imported[name] = len(rows)
 	}
