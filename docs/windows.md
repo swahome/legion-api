@@ -143,6 +143,11 @@ tests are skipped.
 
 ## Windows gotchas
 
+- **`migrate` fails with `relation "users" already exists`**: `DATABASE_URL`
+  points at a database that already has tables legion-api didn't create (for
+  example the legacy data restored by hand). Point it at an empty database,
+  run `migrate`, then load the legacy data with `import-legacy -dump`.
+
 - **`curl` is not curl** in Windows PowerShell 5.1; it is an alias for
   `Invoke-WebRequest`. Type `curl.exe`.
 - **"psql is not recognized"**: the PostgreSQL `bin` folder isn't on `PATH`.
