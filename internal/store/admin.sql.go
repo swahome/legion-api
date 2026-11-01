@@ -558,7 +558,7 @@ func (q *Queries) RevokeUserRefreshTokens(ctx context.Context, userID int64) err
 }
 
 const setGroupStatus = `-- name: SetGroupStatus :one
-UPDATE groups SET status = $2, updated_at = now() WHERE id = $1 RETURNING id, legacy_id, name, slug, email, phone, address, country_code, currency, timezone, status, owner_user_id, settings, created_at, updated_at
+UPDATE groups SET status = $2, updated_at = now() WHERE id = $1 RETURNING id, legacy_id, name, slug, email, phone, address, country_code, currency, timezone, status, owner_user_id, settings, created_at, updated_at, created_by, setup_completed_at
 `
 
 type SetGroupStatusParams struct {
@@ -585,6 +585,8 @@ func (q *Queries) SetGroupStatus(ctx context.Context, arg SetGroupStatusParams) 
 		&i.Settings,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CreatedBy,
+		&i.SetupCompletedAt,
 	)
 	return i, err
 }

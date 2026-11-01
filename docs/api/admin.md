@@ -25,6 +25,20 @@ Paged lists take `page` (from 1) and `page_size` (1 to 200, default 50) and retu
 | GET | `/admin/jobs?job=billing` | Paged run history, newest first: `run_date`, `trigger` (`schedule`, `manual` or `cli`), `status` (`running`, `succeeded`, `failed`), `summary` (counts of invoices and fines raised, schedules skipped and any `problems`), `error`, `started_by` |
 | POST | `/admin/jobs/billing/run` | Runs billing now in the background, for today or `{"date": "YYYY-MM-DD"}` (not in the future). 202; 409 `job_running` if a run is in progress. Re-running a day adds nothing it already raised |
 
+## SMS
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/admin/sms?status=&group_id=&phone=` | Paged outbox, newest first: `to`, `body`, `kind` (`verify_phone`, `reset_password`, `invite`, `app_pin`, ...), `status` (`queued`, `sending`, `sent`, `failed`), `attempts`, Africa's Talking's `provider_status` and `cost`, `error` |
+
+Texts are queued in the same transaction as the change that sends them, and a
+dispatcher inside the binary sends them through Africa's Talking
+(`LEGION_AT_USERNAME`, `LEGION_AT_API_KEY`, optional `LEGION_AT_SENDER_ID`;
+username `sandbox` uses the sandbox). Failed sends are retried after 30 seconds,
+2 minutes, 10 minutes, 1 hour and 6 hours, then marked failed. Without credentials
+texts are written to the log instead. The legacy `disable_smses` setting marks
+every text failed without sending it.
+
 ## Groups
 
 | Method | Path | Purpose |

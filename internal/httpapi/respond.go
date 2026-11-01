@@ -6,6 +6,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type errorBody struct {
@@ -50,3 +53,12 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	}
 	return true
 }
+
+// isUniqueViolation reports a unique constraint error on the named index.
+func isUniqueViolation(err error, constraint string) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == constraint
+}
+
+// timeNow is the clock handlers compare expiry times with.
+var timeNow = time.Now

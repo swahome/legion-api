@@ -113,7 +113,7 @@ func Load(ctx context.Context, pool *pgxpool.Pool, p *Plan, replace bool) error 
 				mobile_money_providers, sacco_branches, saccos, contribution_fine_rules, contribution_members,
 				contribution_schedules, contributions, memberships, group_roles, groups,
 				refresh_tokens, login_attempts, user_platform_roles, admin_audit_log, platform_settings,
-				mobile_access_tokens, mobile_pins,
+				mobile_access_tokens, mobile_pins, sms_messages, user_codes, invites,
 				bank_branches, banks, counties, countries, users RESTART IDENTITY`)
 			if err != nil {
 				return fmt.Errorf("truncate: %w", err)

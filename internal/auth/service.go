@@ -91,6 +91,12 @@ func (s *Service) Login(ctx context.Context, rawIdentity, password string, c Cli
 	return s.startSession(ctx, s.q, user, uuid.New(), c)
 }
 
+// StartSession signs a user in without a password, after sign-up, a
+// password reset or accepting an invite proved who they are.
+func (s *Service) StartSession(ctx context.Context, user store.User, c ClientInfo) (Session, error) {
+	return s.startSession(ctx, s.q, user, uuid.New(), c)
+}
+
 // Authenticate checks a password with the login throttle, without starting
 // a web session. The mobile app API issues its own tokens.
 func (s *Service) Authenticate(ctx context.Context, rawIdentity, password string, c ClientInfo) (store.User, error) {

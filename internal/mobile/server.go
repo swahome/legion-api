@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/swahome/legion-api/internal/account"
 	"github.com/swahome/legion-api/internal/auth"
 	"github.com/swahome/legion-api/internal/store"
 )
@@ -41,8 +42,17 @@ type Server struct {
 	keys    *Keys
 	auth    *auth.Service
 	otp     OTPSender
+	acct    *account.Service
+	smsKick func()
 	now     func() time.Time
 	actions map[string]action
+}
+
+// WithAccounts sets the sign-up settings and the hook that wakes the SMS
+// dispatcher after a commit that queued a message.
+func (s *Server) WithAccounts(acct *account.Service, kick func()) *Server {
+	s.acct, s.smsKick = acct, kick
+	return s
 }
 
 // action handles one decrypted request and returns the legacy "response".
@@ -64,7 +74,8 @@ func New(pool *pgxpool.Pool, keys *Keys, authSvc *auth.Service, otp OTPSender) *
 	if otp == nil {
 		otp = noOTPSender{}
 	}
-	s := &Server{pool: pool, q: store.New(pool), keys: keys, auth: authSvc, otp: otp, now: time.Now}
+	s := &Server{pool: pool, q: store.New(pool), keys: keys, auth: authSvc, otp: otp, now: time.Now,
+		acct: &account.Service{}, smsKick: func() {}}
 	s.actions = map[string]action{
 		"login":                 {public: true, fn: s.login},
 		"generate_pin":          {public: true, fn: s.generatePin},
@@ -194,6 +205,25 @@ func New(pool *pgxpool.Pool, keys *Keys, authSvc *auth.Service, otp OTPSender) *
 		"withdrawals/record_bank_loan_repayment": {fn: s.groupAction(6, s.officialsOnly(s.recordBankLoanRepayment))},
 		"reports/bank_loans_summary":             {fn: s.groupAction(6, s.bankLoansSummary)},
 		"debtors/get_debtors_list":               {fn: s.groupAction(6, s.debtorsList)},
+
+		// Sign-up, password reset and the setup wizard (milestone 5).
+		"register_user":                                 {public: true, fn: s.registerUser},
+		"forgot_password":                               {public: true, fn: s.forgotPassword},
+		"validate_forgot_password_code":                 {public: true, fn: s.validateForgotPasswordCode},
+		"reset_password":                                {public: true, fn: s.resetPassword},
+		"create_group":                                  {fn: s.userAction(s.createGroup)},
+		"complete_group_setup":                          {fn: s.groupAction(6, s.officialsOnly(s.completeGroupSetup))},
+		"members/send_invitation":                       {fn: s.groupAction(6, s.officialsOnly(s.sendInvitation))},
+		"members/reassign_member_group_role":            {fn: s.groupAction(6, s.officialsOnly(s.reassignMemberGroupRole))},
+		"setup_tasks/index":                             {fn: s.userAction(s.setupTasksIndex)},
+		"setup_tasks/add_group_members":                 {fn: s.groupAction(6, s.officialsOnly(s.addGroupMembers))},
+		"setup_tasks/resend_group_invitation":           {fn: s.groupAction(6, s.officialsOnly(s.resendGroupInvitation))},
+		"setup_tasks/cancel_group_invitation":           {fn: s.groupAction(6, s.officialsOnly(s.cancelGroupInvitation))},
+		"setup_tasks/reassign_member_group_role":        {fn: s.groupAction(6, s.officialsOnly(s.reassignMemberGroupRole))},
+		"setup_tasks/create_group_contribution_setting": {fn: s.groupAction(6, s.officialsOnly(s.createGroupContributionSetting))},
+		"setup_tasks/edit_contribution_setting":         {fn: s.groupAction(6, s.officialsOnly(s.editContributionSetting))},
+		"setup_tasks/contributing_members":              {fn: s.groupAction(6, s.officialsOnly(s.contributingMembers))},
+		"setup_tasks/contribution_fine_settings":        {fn: s.groupAction(6, s.officialsOnly(s.contributionFineSettings))},
 	}
 	// debtor_loan_types/* are the loan_types actions on the types offered to
 	// debtors (the legacy controllers were copies of each other).

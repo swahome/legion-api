@@ -40,6 +40,15 @@ type Config struct {
 	// BillingAt is the daily time of the invoicing and fines run in
 	// Location (LEGION_BILLING_AT, "off" turns the scheduler off).
 	BillingAt string
+
+	// WebURL is the web app's address (LEGION_WEB_URL), for the links in
+	// invite texts, e.g. https://legion.com.
+	WebURL string
+	// Africa's Talking SMS (LEGION_AT_USERNAME, LEGION_AT_API_KEY and the
+	// optional LEGION_AT_SENDER_ID). Without them texts are only logged.
+	ATUsername string
+	ATAPIKey   string
+	ATSenderID string
 }
 
 // LoadEnvFile reads KEY=VALUE pairs from LEGION_ENV_FILE, or ./.env when
@@ -71,6 +80,10 @@ func Load() (Config, error) {
 		MobileServerKey:    os.Getenv("LEGION_MOBILE_SERVER_KEY"),
 		MobileAppCert:      os.Getenv("LEGION_MOBILE_APP_CERT"),
 		BillingAt:          getenv("LEGION_BILLING_AT", "00:30"),
+		WebURL:             os.Getenv("LEGION_WEB_URL"),
+		ATUsername:         os.Getenv("LEGION_AT_USERNAME"),
+		ATAPIKey:           os.Getenv("LEGION_AT_API_KEY"),
+		ATSenderID:         os.Getenv("LEGION_AT_SENDER_ID"),
 	}
 	var err error
 	if c.AccessTTL, err = time.ParseDuration(getenv("LEGION_ACCESS_TTL", "15m")); err != nil {
@@ -93,6 +106,9 @@ func Load() (Config, error) {
 	}
 	if (c.MobileServerKey == "") != (c.MobileAppCert == "") {
 		return c, errors.New("set both LEGION_MOBILE_SERVER_KEY and LEGION_MOBILE_APP_CERT, or neither")
+	}
+	if (c.ATUsername == "") != (c.ATAPIKey == "") {
+		return c, errors.New("set both LEGION_AT_USERNAME and LEGION_AT_API_KEY, or neither")
 	}
 	if len(c.JWTSecret) < 32 {
 		return c, errors.New("LEGION_JWT_SECRET must be at least 32 bytes")

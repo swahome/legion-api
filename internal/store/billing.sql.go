@@ -155,7 +155,7 @@ JOIN contribution_schedules s ON s.contribution_id = c.id
 JOIN groups g ON g.id = c.group_id
 WHERE f.is_active AND s.fines_enabled AND s.invoicing_active
   AND c.kind = 'regular' AND c.is_active AND NOT c.is_closed AND c.deleted_at IS NULL
-  AND g.status IN ('setup', 'active')
+  AND g.status = 'active'
   AND f.next_fine_date IS NOT NULL AND f.next_fine_date <= $1::date
 ORDER BY f.id
 `
@@ -225,7 +225,7 @@ FROM contribution_schedules s
 JOIN contributions c ON c.id = s.contribution_id
 JOIN groups g ON g.id = c.group_id
 WHERE s.invoicing_active AND c.is_active AND NOT c.is_closed AND c.deleted_at IS NULL
-  AND g.status IN ('setup', 'active')
+  AND g.status = 'active'
   AND c.kind IN ('regular', 'one_time')
   AND s.invoice_date IS NOT NULL AND s.contribution_date IS NOT NULL
   AND s.invoice_date <= $1::date

@@ -63,7 +63,7 @@ func (q *Queries) CreateUserWithoutPassword(ctx context.Context, arg CreateUserW
 }
 
 const getActiveMembership = `-- name: GetActiveMembership :one
-SELECT id, legacy_id, group_id, user_id, is_official, group_role_id, membership_number, date_of_birth, physical_address, postal_address, status, joined_at, updated_at, profile FROM memberships
+SELECT id, legacy_id, group_id, user_id, is_official, group_role_id, membership_number, date_of_birth, physical_address, postal_address, status, joined_at, updated_at, profile, invited_at FROM memberships
 WHERE group_id = $1 AND user_id = $2 AND status = 'active'
 `
 
@@ -90,12 +90,13 @@ func (q *Queries) GetActiveMembership(ctx context.Context, arg GetActiveMembersh
 		&i.JoinedAt,
 		&i.UpdatedAt,
 		&i.Profile,
+		&i.InvitedAt,
 	)
 	return i, err
 }
 
 const getGroup = `-- name: GetGroup :one
-SELECT id, legacy_id, name, slug, email, phone, address, country_code, currency, timezone, status, owner_user_id, settings, created_at, updated_at FROM groups WHERE id = $1
+SELECT id, legacy_id, name, slug, email, phone, address, country_code, currency, timezone, status, owner_user_id, settings, created_at, updated_at, created_by, setup_completed_at FROM groups WHERE id = $1
 `
 
 func (q *Queries) GetGroup(ctx context.Context, id int64) (Group, error) {
@@ -117,6 +118,8 @@ func (q *Queries) GetGroup(ctx context.Context, id int64) (Group, error) {
 		&i.Settings,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CreatedBy,
+		&i.SetupCompletedAt,
 	)
 	return i, err
 }
@@ -181,7 +184,7 @@ func (q *Queries) GetMember(ctx context.Context, arg GetMemberParams) (GetMember
 }
 
 const getMembershipByUser = `-- name: GetMembershipByUser :one
-SELECT id, legacy_id, group_id, user_id, is_official, group_role_id, membership_number, date_of_birth, physical_address, postal_address, status, joined_at, updated_at, profile FROM memberships WHERE group_id = $1 AND user_id = $2
+SELECT id, legacy_id, group_id, user_id, is_official, group_role_id, membership_number, date_of_birth, physical_address, postal_address, status, joined_at, updated_at, profile, invited_at FROM memberships WHERE group_id = $1 AND user_id = $2
 `
 
 type GetMembershipByUserParams struct {
@@ -207,6 +210,7 @@ func (q *Queries) GetMembershipByUser(ctx context.Context, arg GetMembershipByUs
 		&i.JoinedAt,
 		&i.UpdatedAt,
 		&i.Profile,
+		&i.InvitedAt,
 	)
 	return i, err
 }

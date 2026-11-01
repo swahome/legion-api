@@ -27,6 +27,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/swahome/legion-api/internal/account"
 	"github.com/swahome/legion-api/internal/auth"
 	"github.com/swahome/legion-api/internal/billing"
 	"github.com/swahome/legion-api/internal/config"
@@ -34,6 +35,7 @@ import (
 	"github.com/swahome/legion-api/internal/httpapi"
 	"github.com/swahome/legion-api/internal/legacy"
 	"github.com/swahome/legion-api/internal/mobile"
+	"github.com/swahome/legion-api/internal/sms"
 	"github.com/swahome/legion-api/internal/store"
 )
 
@@ -94,7 +96,17 @@ func serve() error {
 
 	authSvc := auth.NewService(pool, auth.NewTokenIssuer(cfg.JWTSecret, cfg.AccessTTL), cfg.RefreshTTL, cfg.DefaultCallingCode)
 	engine := billing.New(pool, slog.Default())
-	api := httpapi.New(pool, authSvc, cfg.CookieSecure).WithBilling(engine, cfg.Location)
+	var sender sms.Sender = sms.LogSender{Log: slog.Default()}
+	if cfg.ATUsername != "" {
+		sender = &sms.AfricasTalking{Username: cfg.ATUsername, APIKey: cfg.ATAPIKey, SenderID: cfg.ATSenderID}
+		slog.Info("sms via Africa's Talking", "username", cfg.ATUsername)
+	} else {
+		slog.Warn("sms: LEGION_AT_USERNAME not set, texts are written to the log instead of sent")
+	}
+	dispatcher := sms.NewDispatcher(pool, sender, slog.Default())
+	go dispatcher.Run(ctx)
+	acct := &account.Service{WebURL: cfg.WebURL}
+	api := httpapi.New(pool, authSvc, cfg.CookieSecure).WithBilling(engine, cfg.Location).WithAccounts(acct, dispatcher.Kick)
 	if cfg.BillingAt != "off" {
 		at, err := billing.ParseClock(cfg.BillingAt)
 		if err != nil {
@@ -108,7 +120,7 @@ func serve() error {
 		if err != nil {
 			return err
 		}
-		api.WithMobile(mobile.New(pool, keys, authSvc, nil).Routes())
+		api.WithMobile(mobile.New(pool, keys, authSvc, mobile.SMSOTP{Pool: pool, Kick: dispatcher.Kick}).WithAccounts(acct, dispatcher.Kick).Routes())
 		slog.Info("mobile app API on /v1/legacy")
 	}
 	srv := &http.Server{
