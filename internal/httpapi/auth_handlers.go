@@ -82,6 +82,10 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) writeSession(w http.ResponseWriter, sess auth.Session) {
+	s.writeSessionStatus(w, sess, http.StatusOK)
+}
+
+func (s *Server) writeSessionStatus(w http.ResponseWriter, sess auth.Session, status int) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     refreshCookie,
 		Value:    sess.RefreshToken,
@@ -92,7 +96,7 @@ func (s *Server) writeSession(w http.ResponseWriter, sess auth.Session) {
 		SameSite: http.SameSiteStrictMode,
 	})
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, sessionResponse{
+	writeJSON(w, status, sessionResponse{
 		AccessToken: sess.AccessToken,
 		TokenType:   "Bearer",
 		ExpiresIn:   int(time.Until(sess.AccessExpiresAt).Round(time.Second).Seconds()),

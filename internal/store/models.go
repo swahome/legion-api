@@ -1192,6 +1192,128 @@ func AllRepaymentFrequencyValues() []RepaymentFrequency {
 	}
 }
 
+type SmsStatus string
+
+const (
+	SmsStatusQueued  SmsStatus = "queued"
+	SmsStatusSending SmsStatus = "sending"
+	SmsStatusSent    SmsStatus = "sent"
+	SmsStatusFailed  SmsStatus = "failed"
+)
+
+func (e *SmsStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = SmsStatus(s)
+	case string:
+		*e = SmsStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for SmsStatus: %T", src)
+	}
+	return nil
+}
+
+type NullSmsStatus struct {
+	SmsStatus SmsStatus
+	Valid     bool // Valid is true if SmsStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullSmsStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.SmsStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.SmsStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullSmsStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.SmsStatus), nil
+}
+
+func (e SmsStatus) Valid() bool {
+	switch e {
+	case SmsStatusQueued,
+		SmsStatusSending,
+		SmsStatusSent,
+		SmsStatusFailed:
+		return true
+	}
+	return false
+}
+
+func AllSmsStatusValues() []SmsStatus {
+	return []SmsStatus{
+		SmsStatusQueued,
+		SmsStatusSending,
+		SmsStatusSent,
+		SmsStatusFailed,
+	}
+}
+
+type UserCodePurpose string
+
+const (
+	UserCodePurposeVerifyPhone   UserCodePurpose = "verify_phone"
+	UserCodePurposeResetPassword UserCodePurpose = "reset_password"
+)
+
+func (e *UserCodePurpose) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = UserCodePurpose(s)
+	case string:
+		*e = UserCodePurpose(s)
+	default:
+		return fmt.Errorf("unsupported scan type for UserCodePurpose: %T", src)
+	}
+	return nil
+}
+
+type NullUserCodePurpose struct {
+	UserCodePurpose UserCodePurpose
+	Valid           bool // Valid is true if UserCodePurpose is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullUserCodePurpose) Scan(value interface{}) error {
+	if value == nil {
+		ns.UserCodePurpose, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.UserCodePurpose.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullUserCodePurpose) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.UserCodePurpose), nil
+}
+
+func (e UserCodePurpose) Valid() bool {
+	switch e {
+	case UserCodePurposeVerifyPhone,
+		UserCodePurposeResetPassword:
+		return true
+	}
+	return false
+}
+
+func AllUserCodePurposeValues() []UserCodePurpose {
+	return []UserCodePurpose{
+		UserCodePurposeVerifyPhone,
+		UserCodePurposeResetPassword,
+	}
+}
+
 type WithdrawalKind string
 
 const (
@@ -1610,21 +1732,23 @@ type FineCategory struct {
 }
 
 type Group struct {
-	ID          int64
-	LegacyID    *int32
-	Name        string
-	Slug        string
-	Email       *string
-	Phone       *string
-	Address     *string
-	CountryCode string
-	Currency    string
-	Timezone    string
-	Status      GroupStatus
-	OwnerUserID *int64
-	Settings    []byte
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID               int64
+	LegacyID         *int32
+	Name             string
+	Slug             string
+	Email            *string
+	Phone            *string
+	Address          *string
+	CountryCode      string
+	Currency         string
+	Timezone         string
+	Status           GroupStatus
+	OwnerUserID      *int64
+	Settings         []byte
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	CreatedBy        *int64
+	SetupCompletedAt *time.Time
 }
 
 type GroupAccount struct {
@@ -1672,6 +1796,17 @@ type IncomeCategory struct {
 	DeletedAt   *time.Time
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+}
+
+type Invite struct {
+	TokenHash    []byte
+	UserID       int64
+	GroupID      int64
+	MembershipID int64
+	InvitedBy    *int64
+	CreatedAt    time.Time
+	ExpiresAt    time.Time
+	UsedAt       *time.Time
 }
 
 type JobRun struct {
@@ -1908,6 +2043,7 @@ type Membership struct {
 	JoinedAt         time.Time
 	UpdatedAt        time.Time
 	Profile          []byte
+	InvitedAt        *time.Time
 }
 
 type MobileAccessToken struct {
@@ -1983,6 +2119,25 @@ type SaccoBranch struct {
 	UpdatedAt time.Time
 }
 
+type SmsMessage struct {
+	ID                int64
+	ToPhone           string
+	Body              string
+	Kind              string
+	UserID            *int64
+	GroupID           *int64
+	Status            SmsStatus
+	Attempts          int32
+	NextAttemptAt     time.Time
+	ClaimedAt         *time.Time
+	ProviderMessageID *string
+	ProviderStatus    *string
+	Cost              *string
+	Error             *string
+	CreatedAt         time.Time
+	SentAt            *time.Time
+}
+
 type User struct {
 	ID                    int64
 	LegacyID              *int32
@@ -2000,6 +2155,16 @@ type User struct {
 	UpdatedAt             time.Time
 	Avatar                string
 	IsValidated           bool
+}
+
+type UserCode struct {
+	UserID    int64
+	Purpose   UserCodePurpose
+	CodeHash  []byte
+	Attempts  int32
+	ExpiresAt time.Time
+	TokenHash []byte
+	CreatedAt time.Time
 }
 
 type UserPlatformRole struct {

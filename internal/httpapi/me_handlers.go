@@ -19,6 +19,9 @@ type userResponse struct {
 	Email       *string    `json:"email"`
 	Phone       *string    `json:"phone"`
 	LastLoginAt *time.Time `json:"last_login_at"`
+	// PhoneVerified: the user proved the phone number with a texted code
+	// (sign-up, reset or invite). Creating a group needs it.
+	PhoneVerified bool `json:"phone_verified"`
 }
 
 func toUserResponse(u store.User) userResponse {
@@ -30,6 +33,8 @@ func toUserResponse(u store.User) userResponse {
 		Email:       u.Email,
 		Phone:       u.Phone,
 		LastLoginAt: u.LastLoginAt,
+
+		PhoneVerified: u.IsValidated,
 	}
 }
 

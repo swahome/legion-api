@@ -208,6 +208,9 @@ type addMemberRequest struct {
 	IsOfficial       bool    `json:"is_official"`
 	RoleID           *int64  `json:"role_id"`
 	MembershipNumber *string `json:"membership_number"`
+	// SendInvite texts the new member (default true). Members added while
+	// the group is in setup are texted when setup is finished instead.
+	SendInvite *bool `json:"send_invite"`
 }
 
 // addMember adds a person to the group by phone number. An existing user
@@ -254,23 +257,37 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 			if err := q.ReactivateMembership(r.Context(), existing.ID); err != nil {
 				return err
 			}
-			return q.UpdateMembership(r.Context(), store.UpdateMembershipParams{
+			if err := q.UpdateMembership(r.Context(), store.UpdateMembershipParams{
 				GroupID: a.Group.ID, ID: existing.ID, IsOfficial: &req.IsOfficial,
 				GroupRoleID: req.RoleID, MembershipNumber: req.MembershipNumber,
-			})
+			}); err != nil {
+				return err
+			}
 		case errors.Is(err, pgx.ErrNoRows):
 			memberID, err = q.CreateMembership(r.Context(), store.CreateMembershipParams{
 				GroupID: a.Group.ID, UserID: uid, IsOfficial: req.IsOfficial,
 				GroupRoleID: req.RoleID, MembershipNumber: req.MembershipNumber,
 			})
-			return err
+			if err != nil {
+				return err
+			}
 		default:
 			return err
 		}
+		if a.Group.Status != store.GroupStatusActive || (req.SendInvite != nil && !*req.SendInvite) {
+			return nil
+		}
+		by, err := q.GetUserByID(r.Context(), claimsFrom(r.Context()).UserID)
+		if err != nil || by.ID == uid {
+			return err
+		}
+		_, err = s.acct.Invite(r.Context(), q, a.Group.ID, memberID, by)
+		return err
 	})
 	if s.writeMemberWriteError(w, r, err) {
 		return
 	}
+	s.smsKick()
 	m, err := s.loadMember(r.Context(), a.Group.ID, memberID)
 	if err != nil {
 		writeInternal(w, r, err)

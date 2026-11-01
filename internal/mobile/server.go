@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/swahome/legion-api/internal/account"
 	"github.com/swahome/legion-api/internal/auth"
 	"github.com/swahome/legion-api/internal/store"
 )
@@ -41,8 +42,17 @@ type Server struct {
 	keys    *Keys
 	auth    *auth.Service
 	otp     OTPSender
+	acct    *account.Service
+	smsKick func()
 	now     func() time.Time
 	actions map[string]action
+}
+
+// WithAccounts sets the sign-up settings and the hook that wakes the SMS
+// dispatcher after a commit that queued a message.
+func (s *Server) WithAccounts(acct *account.Service, kick func()) *Server {
+	s.acct, s.smsKick = acct, kick
+	return s
 }
 
 // action handles one decrypted request and returns the legacy "response".
@@ -64,7 +74,8 @@ func New(pool *pgxpool.Pool, keys *Keys, authSvc *auth.Service, otp OTPSender) *
 	if otp == nil {
 		otp = noOTPSender{}
 	}
-	s := &Server{pool: pool, q: store.New(pool), keys: keys, auth: authSvc, otp: otp, now: time.Now}
+	s := &Server{pool: pool, q: store.New(pool), keys: keys, auth: authSvc, otp: otp, now: time.Now,
+		acct: &account.Service{}, smsKick: func() {}}
 	s.actions = map[string]action{
 		"login":                 {public: true, fn: s.login},
 		"generate_pin":          {public: true, fn: s.generatePin},

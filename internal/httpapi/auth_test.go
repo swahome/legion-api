@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/swahome/legion-api/internal/account"
 	"github.com/swahome/legion-api/internal/auth"
 	"github.com/swahome/legion-api/internal/testdb"
 )
@@ -26,7 +27,8 @@ type harness struct {
 func newHarness(t *testing.T) *harness {
 	pool := testdb.New(t)
 	svc := auth.NewService(pool, auth.NewTokenIssuer([]byte("0123456789abcdef0123456789abcdef"), 15*time.Minute), time.Hour, "254")
-	return &harness{t: t, pool: pool, h: New(pool, svc, false).Routes()}
+	acct := &account.Service{WebURL: "https://legion.test"}
+	return &harness{t: t, pool: pool, h: New(pool, svc, false).WithAccounts(acct, func() {}).Routes()}
 }
 
 // createUser inserts a user with a legacy-style ($2y$) bcrypt hash, the

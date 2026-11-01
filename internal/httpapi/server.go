@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/swahome/legion-api/internal/account"
 	"github.com/swahome/legion-api/internal/auth"
 	"github.com/swahome/legion-api/internal/billing"
 	"github.com/swahome/legion-api/internal/store"
@@ -25,13 +26,23 @@ type Server struct {
 	mobile             http.Handler
 	billing            *billing.Engine
 	location           *time.Location
+	acct               *account.Service
+	smsKick            func()
 }
 
 func New(pool *pgxpool.Pool, authSvc *auth.Service, cookieSecure bool) *Server {
 	return &Server{
 		pool: pool, q: store.New(pool), auth: authSvc, cookieSecure: cookieSecure,
 		defaultCallingCode: authSvc.DefaultCallingCode(), location: nairobi(),
+		acct: &account.Service{}, smsKick: func() {},
 	}
+}
+
+// WithAccounts sets the sign-up settings and the hook that wakes the SMS
+// dispatcher after a commit that queued a message.
+func (s *Server) WithAccounts(acct *account.Service, kick func()) *Server {
+	s.acct, s.smsKick = acct, kick
+	return s
 }
 
 // WithMobile serves the legacy mobile app API under /v1/legacy, so the
@@ -59,10 +70,22 @@ func (s *Server) Routes() http.Handler {
 			r.Post("/login", s.login)
 			r.Post("/refresh", s.refresh)
 			r.Post("/logout", s.logout)
+			r.Post("/signup", s.signup)
+			r.Post("/forgot-password", s.forgotPassword)
+			r.Post("/reset-password", s.resetPassword)
+			r.Get("/invites/{token}", s.getInvite)
+			r.Post("/invites/{token}", s.acceptInvite)
+			r.Group(func(r chi.Router) {
+				r.Use(s.requireAuth)
+				r.Post("/verify-phone", s.verifyPhone)
+				r.Post("/verify-phone/resend", s.resendPhoneCode)
+			})
 		})
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
 			r.Get("/me", s.me)
+			r.Post("/groups", s.createGroup)
+			r.Get("/group-types", s.listGroupTypes)
 
 			r.Route("/reference", func(r chi.Router) {
 				r.Get("/countries", s.listCountries)
@@ -101,6 +124,7 @@ func (s *Server) Routes() http.Handler {
 				r.Post("/banks/{bankID}/branches", s.createBranch)
 				r.Patch("/banks/{bankID}/branches/{branchID}", s.updateBranch)
 				r.Get("/jobs", s.adminListJobRuns)
+				r.Get("/sms", s.adminListSMS)
 				r.Post("/jobs/billing/run", s.adminRunBilling)
 			})
 
@@ -146,6 +170,10 @@ func (s *Server) Routes() http.Handler {
 					r.Use(requireOfficial)
 					r.Post("/members", s.addMember)
 					r.Patch("/members/{memberID}", s.updateMember)
+					r.Post("/members/{memberID}/invite", s.inviteMember)
+					r.Patch("/", s.updateGroup)
+					r.Get("/setup", s.getSetup)
+					r.Post("/setup/complete", s.completeSetup)
 					r.Post("/contributions", s.createContribution)
 					r.Patch("/contributions/{contributionID}", s.updateContribution)
 					r.Get("/contribution-balances", s.contributionBalances)
