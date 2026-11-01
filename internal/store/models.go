@@ -78,6 +78,67 @@ func AllAccountKindValues() []AccountKind {
 	}
 }
 
+type AlertStatus string
+
+const (
+	AlertStatusUnreconciled AlertStatus = "unreconciled"
+	AlertStatusReconciled   AlertStatus = "reconciled"
+	AlertStatusIgnored      AlertStatus = "ignored"
+)
+
+func (e *AlertStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = AlertStatus(s)
+	case string:
+		*e = AlertStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for AlertStatus: %T", src)
+	}
+	return nil
+}
+
+type NullAlertStatus struct {
+	AlertStatus AlertStatus
+	Valid       bool // Valid is true if AlertStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullAlertStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.AlertStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.AlertStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullAlertStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.AlertStatus), nil
+}
+
+func (e AlertStatus) Valid() bool {
+	switch e {
+	case AlertStatusUnreconciled,
+		AlertStatusReconciled,
+		AlertStatusIgnored:
+		return true
+	}
+	return false
+}
+
+func AllAlertStatusValues() []AlertStatus {
+	return []AlertStatus{
+		AlertStatusUnreconciled,
+		AlertStatusReconciled,
+		AlertStatusIgnored,
+	}
+}
+
 type ApprovalDecision string
 
 const (
@@ -136,6 +197,64 @@ func AllApprovalDecisionValues() []ApprovalDecision {
 		ApprovalDecisionPending,
 		ApprovalDecisionApproved,
 		ApprovalDecisionDeclined,
+	}
+}
+
+type BankUserRole string
+
+const (
+	BankUserRoleAdmin BankUserRole = "admin"
+	BankUserRoleStaff BankUserRole = "staff"
+)
+
+func (e *BankUserRole) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = BankUserRole(s)
+	case string:
+		*e = BankUserRole(s)
+	default:
+		return fmt.Errorf("unsupported scan type for BankUserRole: %T", src)
+	}
+	return nil
+}
+
+type NullBankUserRole struct {
+	BankUserRole BankUserRole
+	Valid        bool // Valid is true if BankUserRole is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullBankUserRole) Scan(value interface{}) error {
+	if value == nil {
+		ns.BankUserRole, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.BankUserRole.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullBankUserRole) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.BankUserRole), nil
+}
+
+func (e BankUserRole) Valid() bool {
+	switch e {
+	case BankUserRoleAdmin,
+		BankUserRoleStaff:
+		return true
+	}
+	return false
+}
+
+func AllBankUserRoleValues() []BankUserRole {
+	return []BankUserRole{
+		BankUserRoleAdmin,
+		BankUserRoleStaff,
 	}
 }
 
@@ -1052,6 +1171,70 @@ func AllPaymentMethodValues() []PaymentMethod {
 	}
 }
 
+type PaymentRequestStatus string
+
+const (
+	PaymentRequestStatusPending PaymentRequestStatus = "pending"
+	PaymentRequestStatusSent    PaymentRequestStatus = "sent"
+	PaymentRequestStatusFailed  PaymentRequestStatus = "failed"
+	PaymentRequestStatusPaid    PaymentRequestStatus = "paid"
+)
+
+func (e *PaymentRequestStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = PaymentRequestStatus(s)
+	case string:
+		*e = PaymentRequestStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for PaymentRequestStatus: %T", src)
+	}
+	return nil
+}
+
+type NullPaymentRequestStatus struct {
+	PaymentRequestStatus PaymentRequestStatus
+	Valid                bool // Valid is true if PaymentRequestStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullPaymentRequestStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.PaymentRequestStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.PaymentRequestStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullPaymentRequestStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.PaymentRequestStatus), nil
+}
+
+func (e PaymentRequestStatus) Valid() bool {
+	switch e {
+	case PaymentRequestStatusPending,
+		PaymentRequestStatusSent,
+		PaymentRequestStatusFailed,
+		PaymentRequestStatusPaid:
+		return true
+	}
+	return false
+}
+
+func AllPaymentRequestStatusValues() []PaymentRequestStatus {
+	return []PaymentRequestStatus{
+		PaymentRequestStatusPending,
+		PaymentRequestStatusSent,
+		PaymentRequestStatusFailed,
+		PaymentRequestStatusPaid,
+	}
+}
+
 type PlatformRole string
 
 const (
@@ -1557,6 +1740,14 @@ type BankLoan struct {
 	VoidedBy       *int64
 }
 
+type BankUser struct {
+	BankID    int64
+	UserID    int64
+	Role      BankUserRole
+	CreatedBy *int64
+	CreatedAt time.Time
+}
+
 type Contribution struct {
 	ID                      int64
 	LegacyID                *int32
@@ -1664,30 +1855,31 @@ type Debtor struct {
 }
 
 type Deposit struct {
-	ID               int64
-	LegacyID         *int32
-	LegacyType       *int16
-	GroupID          int64
-	AccountID        *int64
-	AccountKind      AccountKind
-	Kind             DepositKind
-	Method           NullPaymentMethod
-	MembershipID     *int64
-	ContributionID   *int64
-	FineCategoryID   *int64
-	IncomeCategoryID *int64
-	DepositorID      *int64
-	Amount           pgtype.Numeric
-	DepositDate      time.Time
-	Description      string
-	IsBackdated      bool
-	Refs             []byte
-	CreatedBy        *int64
-	CreatedAt        time.Time
-	VoidedAt         *time.Time
-	VoidedBy         *int64
-	LoanID           *int64
-	BankLoanID       *int64
+	ID                 int64
+	LegacyID           *int32
+	LegacyType         *int16
+	GroupID            int64
+	AccountID          *int64
+	AccountKind        AccountKind
+	Kind               DepositKind
+	Method             NullPaymentMethod
+	MembershipID       *int64
+	ContributionID     *int64
+	FineCategoryID     *int64
+	IncomeCategoryID   *int64
+	DepositorID        *int64
+	Amount             pgtype.Numeric
+	DepositDate        time.Time
+	Description        string
+	IsBackdated        bool
+	Refs               []byte
+	CreatedBy          *int64
+	CreatedAt          time.Time
+	VoidedAt           *time.Time
+	VoidedBy           *int64
+	LoanID             *int64
+	BankLoanID         *int64
+	TransactionAlertID *int64
 }
 
 type Depositor struct {
@@ -2080,6 +2272,31 @@ type MobileRequestID struct {
 	SeenAt    time.Time
 }
 
+type PaymentRequest struct {
+	ID                  int64
+	LegacyID            *int32
+	GroupID             int64
+	MembershipID        *int64
+	UserID              *int64
+	AccountID           *int64
+	AccountNumber       string
+	Phone               string
+	Amount              pgtype.Numeric
+	Reference           string
+	Lines               []byte
+	Channel             string
+	Provider            string
+	Status              PaymentRequestStatus
+	ResponseCode        string
+	ResponseDescription string
+	ResultCode          string
+	ResultDescription   string
+	ProviderRef         *string
+	TransactionAlertID  *int64
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+}
+
 type PlatformSetting struct {
 	Key       string
 	Value     []byte
@@ -2138,6 +2355,33 @@ type SmsMessage struct {
 	SentAt            *time.Time
 }
 
+type TransactionAlert struct {
+	ID             int64
+	LegacyID       *int32
+	Source         string
+	ProviderRef    string
+	BankID         *int64
+	AccountNumber  string
+	GroupID        *int64
+	AccountID      *int64
+	Direction      int16
+	Amount         pgtype.Numeric
+	Currency       string
+	TransactionAt  time.Time
+	Reference      string
+	Particulars    string
+	Phone          *string
+	PayerName      string
+	Status         AlertStatus
+	AutoReconciled bool
+	ReconciledBy   *int64
+	ReconciledAt   *time.Time
+	Note           string
+	Raw            []byte
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
 type User struct {
 	ID                    int64
 	LegacyID              *int32
@@ -2173,29 +2417,41 @@ type UserPlatformRole struct {
 	CreatedAt time.Time
 }
 
+type WebhookEvent struct {
+	ID        int64
+	Source    string
+	RemoteIp  string
+	Body      string
+	Outcome   string
+	Detail    string
+	AlertID   *int64
+	CreatedAt time.Time
+}
+
 type Withdrawal struct {
-	ID                int64
-	LegacyID          *int32
-	LegacyType        *int16
-	GroupID           int64
-	AccountID         *int64
-	AccountKind       AccountKind
-	Kind              WithdrawalKind
-	Method            NullPaymentMethod
-	MembershipID      *int64
-	ContributionID    *int64
-	ExpenseCategoryID *int64
-	Amount            pgtype.Numeric
-	WithdrawalDate    time.Time
-	Description       string
-	IsBackdated       bool
-	Refs              []byte
-	CreatedBy         *int64
-	CreatedAt         time.Time
-	VoidedAt          *time.Time
-	VoidedBy          *int64
-	LoanID            *int64
-	BankLoanID        *int64
+	ID                 int64
+	LegacyID           *int32
+	LegacyType         *int16
+	GroupID            int64
+	AccountID          *int64
+	AccountKind        AccountKind
+	Kind               WithdrawalKind
+	Method             NullPaymentMethod
+	MembershipID       *int64
+	ContributionID     *int64
+	ExpenseCategoryID  *int64
+	Amount             pgtype.Numeric
+	WithdrawalDate     time.Time
+	Description        string
+	IsBackdated        bool
+	Refs               []byte
+	CreatedBy          *int64
+	CreatedAt          time.Time
+	VoidedAt           *time.Time
+	VoidedBy           *int64
+	LoanID             *int64
+	BankLoanID         *int64
+	TransactionAlertID *int64
 }
 
 type WithdrawalApproval struct {

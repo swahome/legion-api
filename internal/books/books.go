@@ -26,6 +26,15 @@ type Error struct{ Code, Msg string }
 
 func (e Error) Error() string { return e.Msg }
 
+// By is the user an entry is recorded by: nil for the system (userID 0),
+// as when a payment is reconciled automatically.
+func By(userID int64) *int64 {
+	if userID == 0 {
+		return nil
+	}
+	return &userID
+}
+
 // ErrNotFound means the row to void does not exist in the group.
 var ErrNotFound = errors.New("books: not found")
 
@@ -248,7 +257,7 @@ func RecordDeposit(ctx context.Context, q *store.Queries, groupID, userID int64,
 		GroupID: groupID, AccountID: &acct.ID, AccountKind: acct.Kind, Kind: d.Kind,
 		MembershipID: d.MemberID, ContributionID: d.ContributionID, FineCategoryID: d.FineCategoryID,
 		IncomeCategoryID: d.IncomeCategoryID, DepositorID: d.DepositorID, Amount: numeric(d.Amount),
-		DepositDate: *d.Date, Description: d.Description, CreatedBy: &userID,
+		DepositDate: *d.Date, Description: d.Description, CreatedBy: By(userID),
 	}
 	if d.Method != nil {
 		p.Method = store.NullPaymentMethod{PaymentMethod: store.PaymentMethod(*d.Method), Valid: true}
@@ -377,7 +386,7 @@ func WriteWithdrawal(ctx context.Context, q *store.Queries, acct store.GroupAcco
 	p := store.CreateWithdrawalParams{
 		GroupID: acct.GroupID, AccountID: &acct.ID, AccountKind: acct.Kind, Kind: m.Kind,
 		MembershipID: m.MemberID, ContributionID: m.ContributionID, ExpenseCategoryID: m.ExpenseCategoryID,
-		Amount: numeric(m.Amount), WithdrawalDate: date, Description: description, CreatedBy: &userID,
+		Amount: numeric(m.Amount), WithdrawalDate: date, Description: description, CreatedBy: By(userID),
 	}
 	if method != nil {
 		p.Method = store.NullPaymentMethod{PaymentMethod: store.PaymentMethod(*method), Valid: true}

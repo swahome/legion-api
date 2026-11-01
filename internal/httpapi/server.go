@@ -14,6 +14,7 @@ import (
 	"github.com/swahome/legion-api/internal/account"
 	"github.com/swahome/legion-api/internal/auth"
 	"github.com/swahome/legion-api/internal/billing"
+	"github.com/swahome/legion-api/internal/payments"
 	"github.com/swahome/legion-api/internal/store"
 )
 
@@ -28,6 +29,8 @@ type Server struct {
 	location           *time.Location
 	acct               *account.Service
 	smsKick            func()
+	payments           *payments.Service
+	hooks              HookConfig
 }
 
 func New(pool *pgxpool.Pool, authSvc *auth.Service, cookieSecure bool) *Server {
@@ -66,6 +69,7 @@ func (s *Server) Routes() http.Handler {
 		if s.mobile != nil {
 			r.Mount("/legacy", s.mobile)
 		}
+		r.Route("/hooks", s.hookRoutes)
 		r.Route("/auth", func(r chi.Router) {
 			r.Post("/login", s.login)
 			r.Post("/refresh", s.refresh)
@@ -126,8 +130,14 @@ func (s *Server) Routes() http.Handler {
 				r.Get("/jobs", s.adminListJobRuns)
 				r.Get("/sms", s.adminListSMS)
 				r.Post("/jobs/billing/run", s.adminRunBilling)
+				r.Get("/transaction-alerts", s.adminListAlerts)
+				r.Get("/transaction-alerts/{alertID}", s.adminGetAlert)
+				r.Post("/transaction-alerts/{alertID}/assign", s.adminAssignAlert)
+				r.Get("/payments", s.adminListPayments)
+				r.Get("/webhooks", s.adminListWebhooks)
 			})
 
+			r.Route("/bank", s.bankRoutes)
 			r.Route("/groups/{groupID}", func(r chi.Router) {
 				r.Use(s.requireGroup)
 				r.Get("/", s.getGroup)
@@ -152,6 +162,10 @@ func (s *Server) Routes() http.Handler {
 				r.Get("/fines", s.listFines)
 				r.Get("/fine-balances", s.fineBalances)
 				r.Get("/dashboard", s.groupDashboard)
+				r.Get("/pay/options", s.paymentOptions)
+				r.Get("/payments", s.listGroupPayments)
+				r.Post("/payments", s.startPayment)
+				r.Get("/payments/{paymentID}", s.getGroupPayment)
 				r.Get("/loan-types", s.listLoanTypes)
 				r.Get("/loans", s.listLoans)
 				r.Post("/loans/preview", s.previewLoan)
@@ -183,6 +197,15 @@ func (s *Server) Routes() http.Handler {
 					r.Patch("/accounts/{accountID}", s.updateAccount)
 					r.Delete("/accounts/{accountID}", s.deleteAccount)
 					r.Get("/cash-book", s.cashBook)
+					r.Get("/transaction-alerts", s.listGroupAlerts)
+					r.Get("/transaction-alerts/summary", s.alertSummary)
+					r.Get("/transaction-alerts/{alertID}", s.getGroupAlert)
+					r.Post("/transaction-alerts/{alertID}/reconcile", s.reconcileAlert)
+					r.Post("/transaction-alerts/{alertID}/match", s.matchAlert)
+					r.Post("/transaction-alerts/{alertID}/dismiss", s.dismissAlert)
+					r.Post("/transaction-alerts/{alertID}/undo", s.undoAlert)
+					r.Get("/reconciliation-settings", s.getReconcileSettings)
+					r.Patch("/reconciliation-settings", s.updateReconcileSettings)
 
 					r.Post("/income-categories", s.createCategory(s.incomeCategories))
 					r.Patch("/income-categories/{categoryID}", s.updateCategory(s.incomeCategories))

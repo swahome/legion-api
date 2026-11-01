@@ -21,6 +21,7 @@ import (
 type harness struct {
 	t    *testing.T
 	pool *pgxpool.Pool
+	srv  *Server
 	h    http.Handler
 }
 
@@ -28,7 +29,8 @@ func newHarness(t *testing.T) *harness {
 	pool := testdb.New(t)
 	svc := auth.NewService(pool, auth.NewTokenIssuer([]byte("0123456789abcdef0123456789abcdef"), 15*time.Minute), time.Hour, "254")
 	acct := &account.Service{WebURL: "https://legion.test"}
-	return &harness{t: t, pool: pool, h: New(pool, svc, false).WithAccounts(acct, func() {}).Routes()}
+	srv := New(pool, svc, false).WithAccounts(acct, func() {})
+	return &harness{t: t, pool: pool, srv: srv, h: srv.Routes()}
 }
 
 // createUser inserts a user with a legacy-style ($2y$) bcrypt hash, the

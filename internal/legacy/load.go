@@ -45,6 +45,7 @@ var targets = []struct {
 	{"debtors", DebtorCols, func(p *Plan) [][]any { return p.Debtors }},
 	{"bank_loans", BankLoanCols, func(p *Plan) [][]any { return p.BankLoans }},
 	{"loan_types", LoanTypeCols, func(p *Plan) [][]any { return p.LoanTypes }},
+	{"transaction_alerts", TransactionAlertCols, func(p *Plan) [][]any { return p.TransactionAlerts }},
 	{"loans", LoanCols, func(p *Plan) [][]any { return p.Loans }},
 	{"loan_charges", LoanChargeCols, func(p *Plan) [][]any { return p.LoanCharges }},
 	{"loan_guarantors", LoanGuarantorCols, func(p *Plan) [][]any { return p.LoanGuarantors }},
@@ -58,6 +59,8 @@ var targets = []struct {
 	{"ledger_entries", LedgerCols, func(p *Plan) [][]any { return p.Ledger }},
 	{"platform_settings", SettingCols, func(p *Plan) [][]any { return p.Settings }},
 	{"mobile_access_tokens", MobileTokenCols, func(p *Plan) [][]any { return p.MobileTokens }},
+	{"payment_requests", PaymentRequestCols, func(p *Plan) [][]any { return p.PaymentRequests }},
+	{"bank_users", BankUserCols, func(p *Plan) [][]any { return p.BankUsers }},
 }
 
 // Tables with identity ids whose sequences must move past the imported ids.
@@ -66,7 +69,8 @@ var identityTables = []string{"users", "groups", "group_roles", "memberships", "
 	"saccos", "sacco_branches", "mobile_money_providers", "group_accounts", "income_categories",
 	"expense_categories", "fine_categories", "depositors", "deposits", "withdrawals", "account_transfers",
 	"account_entries", "withdrawal_requests", "withdrawal_approvals",
-	"loan_types", "loans", "loan_charges", "loan_repayments", "loan_guarantors", "debtors", "bank_loans"}
+	"loan_types", "loans", "loan_charges", "loan_repayments", "loan_guarantors", "debtors", "bank_loans",
+	"transaction_alerts", "payment_requests"}
 
 var enumTypes = []string{
 	"platform_role", "group_status", "membership_status", "contribution_kind",
@@ -74,6 +78,7 @@ var enumTypes = []string{
 	"account_kind", "deposit_kind", "withdrawal_kind", "payment_method",
 	"withdrawal_request_status", "approval_decision",
 	"interest_type", "interest_rate_per", "repayment_frequency", "loan_charge_kind",
+	"alert_status", "payment_request_status", "bank_user_role",
 }
 
 // Columns that hold decimal strings to send as numeric.
@@ -87,6 +92,7 @@ var numericColumns = map[string][]string{
 	"loans":        {"amount", "interest_rate", "fixed_interest", "fixed_interest_rate"},
 	"bank_loans":   {"amount", "total_payable", "opening_balance"},
 	"loan_charges": {"principal", "interest", "amount"}, "loan_repayments": {"amount"}, "loan_guarantors": {"amount"},
+	"transaction_alerts": {"amount"}, "payment_requests": {"amount"},
 }
 
 var ErrNotEmpty = errors.New("target database already has data; pass -replace to wipe and reload it")
@@ -108,7 +114,7 @@ func Load(ctx context.Context, pool *pgxpool.Pool, p *Plan, replace bool) error 
 
 	return pgx.BeginFunc(ctx, conn.Conn(), func(tx pgx.Tx) error {
 		if replace {
-			_, err := tx.Exec(ctx, `TRUNCATE job_runs, loan_application_approvals, loan_application_guarantors, loan_applications, loan_guarantors, loan_repayments, loan_charges, loans, loan_types, debtors, bank_loans, withdrawal_approvals, withdrawal_requests, ledger_entries, account_entries, account_transfers, withdrawals,
+			_, err := tx.Exec(ctx, `TRUNCATE webhook_events, payment_requests, bank_users, transaction_alerts, job_runs, loan_application_approvals, loan_application_guarantors, loan_applications, loan_guarantors, loan_repayments, loan_charges, loans, loan_types, debtors, bank_loans, withdrawal_approvals, withdrawal_requests, ledger_entries, account_entries, account_transfers, withdrawals,
 				deposits, depositors, fine_categories, expense_categories, income_categories, group_accounts,
 				mobile_money_providers, sacco_branches, saccos, contribution_fine_rules, contribution_members,
 				contribution_schedules, contributions, memberships, group_roles, groups,
@@ -140,6 +146,14 @@ func Load(ctx context.Context, pool *pgxpool.Pool, p *Plan, replace bool) error 
 			}
 			if int(n) != len(rows) {
 				return fmt.Errorf("copy %s: wrote %d of %d rows", t.name, n, len(rows))
+			}
+		}
+		// Deposits and withdrawals made from an alert name it in refs.
+		for _, t := range []string{"deposits", "withdrawals"} {
+			_, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE %s x SET transaction_alert_id = a.id FROM transaction_alerts a
+				WHERE a.id = (x.refs->>'transaction_alert_id')::bigint AND a.group_id = x.group_id`, t))
+			if err != nil {
+				return fmt.Errorf("link %s to alerts: %w", t, err)
 			}
 		}
 		for _, t := range identityTables {

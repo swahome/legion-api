@@ -62,6 +62,11 @@ other command.
   legacy cache table `member_contributions_fines_balances`. This is informational
   only. That table is a whole-shilling cache the old app refreshes on its own
   schedule, and in the anonymized dump it was last written in December 2018.
+- **Payments and bank staff.** `online_payment_requests`, `transaction_alerts`
+  and `user_bank_pairings` are imported as described in `docs/api/payments.md`.
+  On the anonymized dump: 1,101 payment requests (877 paid), one bank user, and
+  no alerts (all 2,325 are blank there). Bank accounts' `account_password` is
+  kept in `group_accounts.settings` for the Chamasoft payment API.
 
 ## Ledger signs
 
