@@ -382,7 +382,7 @@ func (q *Queries) GetAccountTransferView(ctx context.Context, arg GetAccountTran
 }
 
 const getWithdrawal = `-- name: GetWithdrawal :one
-SELECT id, legacy_id, legacy_type, group_id, account_id, account_kind, kind, method, membership_id, contribution_id, expense_category_id, amount, withdrawal_date, description, is_backdated, refs, created_by, created_at, voided_at, voided_by, loan_id, bank_loan_id, transaction_alert_id FROM withdrawals WHERE group_id = $1 AND id = $2
+SELECT id, legacy_id, legacy_type, group_id, account_id, account_kind, kind, method, membership_id, contribution_id, expense_category_id, amount, withdrawal_date, description, is_backdated, refs, created_by, created_at, voided_at, voided_by, loan_id, bank_loan_id, transaction_alert_id, asset_id, stock_id, money_market_investment_id, meeting_id FROM withdrawals WHERE group_id = $1 AND id = $2
 `
 
 type GetWithdrawalParams struct {
@@ -417,6 +417,10 @@ func (q *Queries) GetWithdrawal(ctx context.Context, arg GetWithdrawalParams) (W
 		&i.LoanID,
 		&i.BankLoanID,
 		&i.TransactionAlertID,
+		&i.AssetID,
+		&i.StockID,
+		&i.MoneyMarketInvestmentID,
+		&i.MeetingID,
 	)
 	return i, err
 }

@@ -1500,11 +1500,73 @@ func AllSmsStatusValues() []SmsStatus {
 	}
 }
 
+type TransferKind string
+
+const (
+	TransferKindContribution TransferKind = "contribution"
+	TransferKindFine         TransferKind = "fine"
+	TransferKindLoan         TransferKind = "loan"
+)
+
+func (e *TransferKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = TransferKind(s)
+	case string:
+		*e = TransferKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for TransferKind: %T", src)
+	}
+	return nil
+}
+
+type NullTransferKind struct {
+	TransferKind TransferKind
+	Valid        bool // Valid is true if TransferKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullTransferKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.TransferKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.TransferKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullTransferKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.TransferKind), nil
+}
+
+func (e TransferKind) Valid() bool {
+	switch e {
+	case TransferKindContribution,
+		TransferKindFine,
+		TransferKindLoan:
+		return true
+	}
+	return false
+}
+
+func AllTransferKindValues() []TransferKind {
+	return []TransferKind{
+		TransferKindContribution,
+		TransferKindFine,
+		TransferKindLoan,
+	}
+}
+
 type UserCodePurpose string
 
 const (
 	UserCodePurposeVerifyPhone   UserCodePurpose = "verify_phone"
 	UserCodePurposeResetPassword UserCodePurpose = "reset_password"
+	UserCodePurposeChangePhone   UserCodePurpose = "change_phone"
 )
 
 func (e *UserCodePurpose) Scan(src interface{}) error {
@@ -1545,7 +1607,8 @@ func (ns NullUserCodePurpose) Value() (driver.Value, error) {
 func (e UserCodePurpose) Valid() bool {
 	switch e {
 	case UserCodePurposeVerifyPhone,
-		UserCodePurposeResetPassword:
+		UserCodePurposeResetPassword,
+		UserCodePurposeChangePhone:
 		return true
 	}
 	return false
@@ -1555,6 +1618,7 @@ func AllUserCodePurposeValues() []UserCodePurpose {
 	return []UserCodePurpose{
 		UserCodePurposeVerifyPhone,
 		UserCodePurposeResetPassword,
+		UserCodePurposeChangePhone,
 	}
 }
 
@@ -1755,6 +1819,42 @@ type AdminAuditLog struct {
 	CreatedAt  time.Time
 }
 
+type AppActivityLog struct {
+	ID        int64
+	UserID    *int64
+	GroupID   *int64
+	Data      string
+	CreatedAt time.Time
+}
+
+type Asset struct {
+	ID              int64
+	LegacyID        *int32
+	GroupID         int64
+	AssetCategoryID *int64
+	Name            string
+	Cost            pgtype.Numeric
+	Description     string
+	IsBackdated     bool
+	CreatedBy       *int64
+	CreatedAt       time.Time
+	VoidedAt        *time.Time
+}
+
+type AssetCategory struct {
+	ID          int64
+	LegacyID    *int32
+	GroupID     int64
+	Name        string
+	Slug        string
+	Description string
+	IsHidden    bool
+	IsActive    bool
+	CreatedBy   *int64
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
 type Bank struct {
 	ID        int64
 	LegacyID  *int32
@@ -1807,6 +1907,54 @@ type BankUser struct {
 	Role      BankUserRole
 	CreatedBy *int64
 	CreatedAt time.Time
+}
+
+type BillingInvoice struct {
+	ID             int64
+	LegacyID       *int32
+	GroupID        int64
+	Number         string
+	BillingDate    *time.Time
+	DueDate        *time.Time
+	Amount         pgtype.Numeric
+	Tax            pgtype.Numeric
+	ProratedAmount pgtype.Numeric
+	AmountPaid     pgtype.Numeric
+	BillingCycle   *int16
+	PackageID      *int64
+	IsPaid         bool
+	CreatedAt      time.Time
+}
+
+type BillingPackage struct {
+	ID              int64
+	LegacyID        *int32
+	Name            string
+	Slug            string
+	BillingType     *int16
+	MonthlyAmount   pgtype.Numeric
+	QuarterlyAmount pgtype.Numeric
+	AnnualAmount    pgtype.Numeric
+	PercentageTax   pgtype.Numeric
+	IsDefault       bool
+	IsActive        bool
+	Settings        []byte
+}
+
+type BillingPayment struct {
+	ID              int64
+	LegacyID        *int32
+	GroupID         int64
+	ReceiptNumber   string
+	ReceiptDate     *time.Time
+	Amount          pgtype.Numeric
+	Tax             pgtype.Numeric
+	PaymentMethod   *int16
+	TransactionCode string
+	InvoiceID       *int64
+	PackageID       *int64
+	Description     string
+	CreatedAt       time.Time
 }
 
 type ChannelMessage struct {
@@ -1901,6 +2049,28 @@ type ContributionSchedule struct {
 	UpdatedAt           time.Time
 }
 
+type ContributionTransfer struct {
+	ID                 int64
+	LegacyID           *int32
+	GroupID            int64
+	MembershipID       int64
+	FromContributionID *int64
+	FromLoanID         *int64
+	ToMember           bool
+	ToKind             TransferKind
+	ToMembershipID     int64
+	ToContributionID   *int64
+	ToFineCategoryID   *int64
+	ToLoanID           *int64
+	Amount             pgtype.Numeric
+	TransferDate       time.Time
+	Description        string
+	CreatedBy          *int64
+	CreatedAt          time.Time
+	VoidedAt           *time.Time
+	VoidedBy           *int64
+}
+
 type Country struct {
 	ID           int64
 	LegacyID     *int32
@@ -1944,31 +2114,36 @@ type Debtor struct {
 }
 
 type Deposit struct {
-	ID                 int64
-	LegacyID           *int32
-	LegacyType         *int16
-	GroupID            int64
-	AccountID          *int64
-	AccountKind        AccountKind
-	Kind               DepositKind
-	Method             NullPaymentMethod
-	MembershipID       *int64
-	ContributionID     *int64
-	FineCategoryID     *int64
-	IncomeCategoryID   *int64
-	DepositorID        *int64
-	Amount             pgtype.Numeric
-	DepositDate        time.Time
-	Description        string
-	IsBackdated        bool
-	Refs               []byte
-	CreatedBy          *int64
-	CreatedAt          time.Time
-	VoidedAt           *time.Time
-	VoidedBy           *int64
-	LoanID             *int64
-	BankLoanID         *int64
-	TransactionAlertID *int64
+	ID                      int64
+	LegacyID                *int32
+	LegacyType              *int16
+	GroupID                 int64
+	AccountID               *int64
+	AccountKind             AccountKind
+	Kind                    DepositKind
+	Method                  NullPaymentMethod
+	MembershipID            *int64
+	ContributionID          *int64
+	FineCategoryID          *int64
+	IncomeCategoryID        *int64
+	DepositorID             *int64
+	Amount                  pgtype.Numeric
+	DepositDate             time.Time
+	Description             string
+	IsBackdated             bool
+	Refs                    []byte
+	CreatedBy               *int64
+	CreatedAt               time.Time
+	VoidedAt                *time.Time
+	VoidedBy                *int64
+	LoanID                  *int64
+	BankLoanID              *int64
+	TransactionAlertID      *int64
+	AssetID                 *int64
+	StockID                 *int64
+	StockSaleID             *int64
+	MoneyMarketInvestmentID *int64
+	MeetingID               *int64
 }
 
 type Depositor struct {
@@ -2124,10 +2299,11 @@ type LedgerEntry struct {
 	WithdrawalID   *int64
 	GeneratedBy    *string
 	// For a contribution fine: the contribution invoice it fines (legacy invoices.parent_id)
-	ParentEntryID *int64
-	FineRuleID    *int64
-	CreatedBy     *int64
-	VoidedBy      *int64
+	ParentEntryID          *int64
+	FineRuleID             *int64
+	CreatedBy              *int64
+	VoidedBy               *int64
+	ContributionTransferID *int64
 }
 
 type LedgerEntryRule struct {
@@ -2170,6 +2346,7 @@ type Loan struct {
 	VoidedAt          *time.Time
 	VoidedBy          *int64
 	DebtorID          *int64
+	MeetingID         *int64
 }
 
 type LoanApplication struct {
@@ -2213,26 +2390,27 @@ type LoanApplicationGuarantor struct {
 }
 
 type LoanCharge struct {
-	ID          int64
-	GroupID     int64
-	LoanID      int64
-	Kind        LoanChargeKind
-	Number      *int32
-	InvoiceOn   time.Time
-	DueOn       time.Time
-	NextFineOn  *time.Time
-	Principal   pgtype.Numeric
-	Interest    pgtype.Numeric
-	Amount      pgtype.Numeric
-	ParentID    *int64
-	NoFines     bool
-	SentAt      *time.Time
-	Refs        []byte
-	LegacyType  *int16
-	GeneratedBy *string
-	CreatedBy   *int64
-	CreatedAt   time.Time
-	VoidedAt    *time.Time
+	ID                     int64
+	GroupID                int64
+	LoanID                 int64
+	Kind                   LoanChargeKind
+	Number                 *int32
+	InvoiceOn              time.Time
+	DueOn                  time.Time
+	NextFineOn             *time.Time
+	Principal              pgtype.Numeric
+	Interest               pgtype.Numeric
+	Amount                 pgtype.Numeric
+	ParentID               *int64
+	NoFines                bool
+	SentAt                 *time.Time
+	Refs                   []byte
+	LegacyType             *int16
+	GeneratedBy            *string
+	CreatedBy              *int64
+	CreatedAt              time.Time
+	VoidedAt               *time.Time
+	ContributionTransferID *int64
 }
 
 type LoanGuarantor struct {
@@ -2247,23 +2425,24 @@ type LoanGuarantor struct {
 }
 
 type LoanRepayment struct {
-	ID           int64
-	GroupID      int64
-	LoanID       int64
-	MembershipID *int64
-	DepositID    *int64
-	AccountID    *int64
-	Method       NullPaymentMethod
-	Amount       pgtype.Numeric
-	PaidOn       time.Time
-	Source       string
-	Description  string
-	Refs         []byte
-	IsBackdated  bool
-	CreatedBy    *int64
-	CreatedAt    time.Time
-	VoidedAt     *time.Time
-	VoidedBy     *int64
+	ID                     int64
+	GroupID                int64
+	LoanID                 int64
+	MembershipID           *int64
+	DepositID              *int64
+	AccountID              *int64
+	Method                 NullPaymentMethod
+	Amount                 pgtype.Numeric
+	PaidOn                 time.Time
+	Source                 string
+	Description            string
+	Refs                   []byte
+	IsBackdated            bool
+	CreatedBy              *int64
+	CreatedAt              time.Time
+	VoidedAt               *time.Time
+	VoidedBy               *int64
+	ContributionTransferID *int64
 }
 
 type LoanType struct {
@@ -2307,6 +2486,33 @@ type LoginAttempt struct {
 	Identity    string
 	IpAddress   *netip.Addr
 	AttemptedAt time.Time
+}
+
+type Meeting struct {
+	ID        int64
+	LegacyID  *int32
+	GroupID   int64
+	Title     string
+	Venue     string
+	Purpose   string
+	MeetingAt time.Time
+	CreatedBy *int64
+	CreatedAt time.Time
+}
+
+type MeetingAttendance struct {
+	MeetingID    int64
+	GroupID      int64
+	MembershipID int64
+	Status       int16
+}
+
+type MeetingItem struct {
+	ID        int64
+	MeetingID int64
+	Kind      string
+	Name      string
+	Position  int32
 }
 
 type Membership struct {
@@ -2361,6 +2567,45 @@ type MobileRequestID struct {
 	SeenAt    time.Time
 }
 
+type MoneyMarketInvestment struct {
+	ID             int64
+	LegacyID       *int32
+	GroupID        int64
+	Institution    string
+	InvestmentDate time.Time
+	Amount         pgtype.Numeric
+	Description    string
+	AccountID      *int64
+	IsClosed       bool
+	CashInAmount   pgtype.Numeric
+	CashInDate     *time.Time
+	IsBackdated    bool
+	CreatedBy      *int64
+	CreatedAt      time.Time
+	VoidedAt       *time.Time
+}
+
+type Notification struct {
+	ID           int64
+	LegacyID     *int32
+	GroupID      int64
+	MembershipID int64
+	UserID       *int64
+	FromUserID   *int64
+	Subject      string
+	Message      string
+	Category     int16
+	CallToAction string
+	Link         string
+	FilePath     string
+	FileType     string
+	FileSize     *int64
+	Refs         []byte
+	IsRead       bool
+	CreatedAt    time.Time
+	ReadAt       *time.Time
+}
+
 type PaymentRequest struct {
 	ID                  int64
 	LegacyID            *int32
@@ -2384,6 +2629,13 @@ type PaymentRequest struct {
 	TransactionAlertID  *int64
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
+}
+
+type PhoneChange struct {
+	UserID    int64
+	OldPhone  *string
+	NewPhone  string
+	CreatedAt time.Time
 }
 
 type PlatformSetting struct {
@@ -2444,6 +2696,57 @@ type SmsMessage struct {
 	SentAt            *time.Time
 }
 
+type StatementRequest struct {
+	ID           int64
+	GroupID      int64
+	MembershipID int64
+	UserID       int64
+	Kind         int16
+	Action       int16
+	FileType     int16
+	DateFrom     time.Time
+	DateTo       time.Time
+	Email        string
+	LoanID       *int64
+	Status       string
+	Attempts     int32
+	FilePath     string
+	Error        string
+	CreatedAt    time.Time
+	DoneAt       *time.Time
+}
+
+type Stock struct {
+	ID            int64
+	LegacyID      *int32
+	GroupID       int64
+	Name          string
+	PurchaseDate  time.Time
+	Shares        pgtype.Numeric
+	SharesSold    pgtype.Numeric
+	PurchasePrice pgtype.Numeric
+	CurrentPrice  pgtype.Numeric
+	AccountID     *int64
+	IsBackdated   bool
+	CreatedBy     *int64
+	CreatedAt     time.Time
+	VoidedAt      *time.Time
+}
+
+type StockSale struct {
+	ID            int64
+	LegacyID      *int32
+	GroupID       int64
+	StockID       int64
+	AccountID     *int64
+	SaleDate      time.Time
+	Shares        pgtype.Numeric
+	PricePerShare pgtype.Numeric
+	CreatedBy     *int64
+	CreatedAt     time.Time
+	VoidedAt      *time.Time
+}
+
 type TransactionAlert struct {
 	ID             int64
 	LegacyID       *int32
@@ -2488,6 +2791,7 @@ type User struct {
 	UpdatedAt             time.Time
 	Avatar                string
 	IsValidated           bool
+	MobileToken           string
 }
 
 type UserCode struct {
@@ -2518,29 +2822,33 @@ type WebhookEvent struct {
 }
 
 type Withdrawal struct {
-	ID                 int64
-	LegacyID           *int32
-	LegacyType         *int16
-	GroupID            int64
-	AccountID          *int64
-	AccountKind        AccountKind
-	Kind               WithdrawalKind
-	Method             NullPaymentMethod
-	MembershipID       *int64
-	ContributionID     *int64
-	ExpenseCategoryID  *int64
-	Amount             pgtype.Numeric
-	WithdrawalDate     time.Time
-	Description        string
-	IsBackdated        bool
-	Refs               []byte
-	CreatedBy          *int64
-	CreatedAt          time.Time
-	VoidedAt           *time.Time
-	VoidedBy           *int64
-	LoanID             *int64
-	BankLoanID         *int64
-	TransactionAlertID *int64
+	ID                      int64
+	LegacyID                *int32
+	LegacyType              *int16
+	GroupID                 int64
+	AccountID               *int64
+	AccountKind             AccountKind
+	Kind                    WithdrawalKind
+	Method                  NullPaymentMethod
+	MembershipID            *int64
+	ContributionID          *int64
+	ExpenseCategoryID       *int64
+	Amount                  pgtype.Numeric
+	WithdrawalDate          time.Time
+	Description             string
+	IsBackdated             bool
+	Refs                    []byte
+	CreatedBy               *int64
+	CreatedAt               time.Time
+	VoidedAt                *time.Time
+	VoidedBy                *int64
+	LoanID                  *int64
+	BankLoanID              *int64
+	TransactionAlertID      *int64
+	AssetID                 *int64
+	StockID                 *int64
+	MoneyMarketInvestmentID *int64
+	MeetingID               *int64
 }
 
 type WithdrawalApproval struct {

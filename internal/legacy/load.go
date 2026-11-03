@@ -38,6 +38,14 @@ var targets = []struct {
 	{"sacco_branches", SaccoBranchCols, func(p *Plan) [][]any { return p.SaccoBranches }},
 	{"mobile_money_providers", ProviderCols, func(p *Plan) [][]any { return p.Providers }},
 	{"group_accounts", AccountCols, func(p *Plan) [][]any { return p.Accounts }},
+	{"asset_categories", AssetCategoryCols, func(p *Plan) [][]any { return p.AssetCategories }},
+	{"assets", AssetCols, func(p *Plan) [][]any { return p.Assets }},
+	{"stocks", StockCols, func(p *Plan) [][]any { return p.Stocks }},
+	{"stock_sales", StockSaleCols, func(p *Plan) [][]any { return p.StockSales }},
+	{"money_market_investments", MoneyMarketCols, func(p *Plan) [][]any { return p.MoneyMarket }},
+	{"meetings", MeetingCols, func(p *Plan) [][]any { return p.Meetings }},
+	{"meeting_attendance", MeetingAttendanceCols, func(p *Plan) [][]any { return p.MeetingAttendance }},
+	{"meeting_items", MeetingItemCols, func(p *Plan) [][]any { return p.MeetingItems }},
 	{"income_categories", IncomeCategoryCols, func(p *Plan) [][]any { return p.IncomeCategories }},
 	{"expense_categories", ExpenseCategoryCols, func(p *Plan) [][]any { return p.ExpenseCategories }},
 	{"fine_categories", FineCategoryCols, func(p *Plan) [][]any { return p.FineCategories }},
@@ -47,6 +55,7 @@ var targets = []struct {
 	{"loan_types", LoanTypeCols, func(p *Plan) [][]any { return p.LoanTypes }},
 	{"transaction_alerts", TransactionAlertCols, func(p *Plan) [][]any { return p.TransactionAlerts }},
 	{"loans", LoanCols, func(p *Plan) [][]any { return p.Loans }},
+	{"contribution_transfers", ContributionTransferCols, func(p *Plan) [][]any { return p.ContributionTransfers }},
 	{"loan_charges", LoanChargeCols, func(p *Plan) [][]any { return p.LoanCharges }},
 	{"loan_guarantors", LoanGuarantorCols, func(p *Plan) [][]any { return p.LoanGuarantors }},
 	{"deposits", DepositCols, func(p *Plan) [][]any { return p.Deposits }},
@@ -61,6 +70,10 @@ var targets = []struct {
 	{"mobile_access_tokens", MobileTokenCols, func(p *Plan) [][]any { return p.MobileTokens }},
 	{"payment_requests", PaymentRequestCols, func(p *Plan) [][]any { return p.PaymentRequests }},
 	{"bank_users", BankUserCols, func(p *Plan) [][]any { return p.BankUsers }},
+	{"notifications", NotificationCols, func(p *Plan) [][]any { return p.Notifications }},
+	{"billing_packages", BillingPackageCols, func(p *Plan) [][]any { return p.BillingPackages }},
+	{"billing_invoices", BillingInvoiceCols, func(p *Plan) [][]any { return p.BillingInvoices }},
+	{"billing_payments", BillingPaymentCols, func(p *Plan) [][]any { return p.BillingPayments }},
 }
 
 // Tables with identity ids whose sequences must move past the imported ids.
@@ -70,7 +83,9 @@ var identityTables = []string{"users", "groups", "group_roles", "memberships", "
 	"expense_categories", "fine_categories", "depositors", "deposits", "withdrawals", "account_transfers",
 	"account_entries", "withdrawal_requests", "withdrawal_approvals",
 	"loan_types", "loans", "loan_charges", "loan_repayments", "loan_guarantors", "debtors", "bank_loans",
-	"transaction_alerts", "payment_requests"}
+	"transaction_alerts", "payment_requests", "asset_categories", "assets", "stocks", "stock_sales",
+	"money_market_investments", "meetings", "contribution_transfers", "notifications", "billing_packages",
+	"billing_invoices", "billing_payments"}
 
 var enumTypes = []string{
 	"platform_role", "group_status", "membership_status", "contribution_kind",
@@ -78,7 +93,7 @@ var enumTypes = []string{
 	"account_kind", "deposit_kind", "withdrawal_kind", "payment_method",
 	"withdrawal_request_status", "approval_decision",
 	"interest_type", "interest_rate_per", "repayment_frequency", "loan_charge_kind",
-	"alert_status", "payment_request_status", "bank_user_role",
+	"alert_status", "payment_request_status", "bank_user_role", "transfer_kind",
 }
 
 // Columns that hold decimal strings to send as numeric.
@@ -93,6 +108,12 @@ var numericColumns = map[string][]string{
 	"bank_loans":   {"amount", "total_payable", "opening_balance"},
 	"loan_charges": {"principal", "interest", "amount"}, "loan_repayments": {"amount"}, "loan_guarantors": {"amount"},
 	"transaction_alerts": {"amount"}, "payment_requests": {"amount"},
+	"assets": {"cost"}, "stocks": {"shares", "shares_sold", "purchase_price", "current_price"},
+	"stock_sales": {"shares", "price_per_share"}, "money_market_investments": {"amount", "cash_in_amount"},
+	"contribution_transfers": {"amount"},
+	"billing_packages":       {"monthly_amount", "quarterly_amount", "annual_amount", "percentage_tax"},
+	"billing_invoices":       {"amount", "tax", "prorated_amount", "amount_paid"},
+	"billing_payments":       {"amount", "tax"},
 }
 
 var ErrNotEmpty = errors.New("target database already has data; pass -replace to wipe and reload it")
@@ -114,8 +135,9 @@ func Load(ctx context.Context, pool *pgxpool.Pool, p *Plan, replace bool) error 
 
 	return pgx.BeginFunc(ctx, conn.Conn(), func(tx pgx.Tx) error {
 		if replace {
-			_, err := tx.Exec(ctx, `TRUNCATE channel_messages, channel_sessions, webhook_events, payment_requests, bank_users, transaction_alerts, job_runs, loan_application_approvals, loan_application_guarantors, loan_applications, loan_guarantors, loan_repayments, loan_charges, loans, loan_types, debtors, bank_loans, withdrawal_approvals, withdrawal_requests, ledger_entries, account_entries, account_transfers, withdrawals,
-				deposits, depositors, fine_categories, expense_categories, income_categories, group_accounts,
+			_, err := tx.Exec(ctx, `TRUNCATE app_activity_logs, statement_requests, billing_payments, billing_invoices, billing_packages,
+				notifications, meeting_items, meeting_attendance, phone_changes, channel_messages, channel_sessions, webhook_events, payment_requests, bank_users, transaction_alerts, job_runs, loan_application_approvals, loan_application_guarantors, loan_applications, loan_guarantors, loan_repayments, loan_charges, contribution_transfers, loans, loan_types, debtors, bank_loans, withdrawal_approvals, withdrawal_requests, ledger_entries, account_entries, account_transfers, withdrawals,
+				deposits, stock_sales, stocks, money_market_investments, assets, asset_categories, meetings, depositors, fine_categories, expense_categories, income_categories, group_accounts,
 				mobile_money_providers, sacco_branches, saccos, contribution_fine_rules, contribution_members,
 				contribution_schedules, contributions, memberships, group_roles, groups,
 				refresh_tokens, login_attempts, user_platform_roles, admin_audit_log, platform_settings,
@@ -154,6 +176,11 @@ func Load(ctx context.Context, pool *pgxpool.Pool, p *Plan, replace bool) error 
 				WHERE a.id = (x.refs->>'transaction_alert_id')::bigint AND a.group_id = x.group_id`, t))
 			if err != nil {
 				return fmt.Errorf("link %s to alerts: %w", t, err)
+			}
+		}
+		for _, q := range sweepLinks {
+			if _, err := tx.Exec(ctx, q); err != nil {
+				return fmt.Errorf("link milestone 8 rows: %w", err)
 			}
 		}
 		for _, t := range identityTables {

@@ -701,7 +701,7 @@ func (q *Queries) GetLoanApplicationForUpdate(ctx context.Context, arg GetLoanAp
 }
 
 const getLoanForUpdate = `-- name: GetLoanForUpdate :one
-SELECT id, group_id, membership_id, loan_type_id, amount, disbursed_on, account_id, interest_type, interest_rate, rate_per, reducing_method, fixed_interest, fixed_interest_rate, frequency, installments, grace_periods, first_due_on, ends_on, late_fine, balance_fine, processing_fee, fine_deferment, next_balance_fine_on, is_bad_debt, description, settings, is_backdated, created_by, created_at, updated_at, voided_at, voided_by, debtor_id FROM loans WHERE group_id = $1 AND id = $2 FOR UPDATE
+SELECT id, group_id, membership_id, loan_type_id, amount, disbursed_on, account_id, interest_type, interest_rate, rate_per, reducing_method, fixed_interest, fixed_interest_rate, frequency, installments, grace_periods, first_due_on, ends_on, late_fine, balance_fine, processing_fee, fine_deferment, next_balance_fine_on, is_bad_debt, description, settings, is_backdated, created_by, created_at, updated_at, voided_at, voided_by, debtor_id, meeting_id FROM loans WHERE group_id = $1 AND id = $2 FOR UPDATE
 `
 
 type GetLoanForUpdateParams struct {
@@ -746,12 +746,13 @@ func (q *Queries) GetLoanForUpdate(ctx context.Context, arg GetLoanForUpdatePara
 		&i.VoidedAt,
 		&i.VoidedBy,
 		&i.DebtorID,
+		&i.MeetingID,
 	)
 	return i, err
 }
 
 const getLoanRepayment = `-- name: GetLoanRepayment :one
-SELECT id, group_id, loan_id, membership_id, deposit_id, account_id, method, amount, paid_on, source, description, refs, is_backdated, created_by, created_at, voided_at, voided_by FROM loan_repayments WHERE group_id = $1 AND id = $2
+SELECT id, group_id, loan_id, membership_id, deposit_id, account_id, method, amount, paid_on, source, description, refs, is_backdated, created_by, created_at, voided_at, voided_by, contribution_transfer_id FROM loan_repayments WHERE group_id = $1 AND id = $2
 `
 
 type GetLoanRepaymentParams struct {
@@ -780,6 +781,7 @@ func (q *Queries) GetLoanRepayment(ctx context.Context, arg GetLoanRepaymentPara
 		&i.CreatedAt,
 		&i.VoidedAt,
 		&i.VoidedBy,
+		&i.ContributionTransferID,
 	)
 	return i, err
 }
@@ -835,7 +837,7 @@ func (q *Queries) GetLoanType(ctx context.Context, arg GetLoanTypeParams) (LoanT
 }
 
 const getLoanView = `-- name: GetLoanView :one
-SELECT l.id, l.group_id, l.membership_id, l.loan_type_id, l.amount, l.disbursed_on, l.account_id, l.interest_type, l.interest_rate, l.rate_per, l.reducing_method, l.fixed_interest, l.fixed_interest_rate, l.frequency, l.installments, l.grace_periods, l.first_due_on, l.ends_on, l.late_fine, l.balance_fine, l.processing_fee, l.fine_deferment, l.next_balance_fine_on, l.is_bad_debt, l.description, l.settings, l.is_backdated, l.created_by, l.created_at, l.updated_at, l.voided_at, l.voided_by, l.debtor_id, coalesce(u.first_name || ' ' || u.last_name, dr.name)::text AS member_name,
+SELECT l.id, l.group_id, l.membership_id, l.loan_type_id, l.amount, l.disbursed_on, l.account_id, l.interest_type, l.interest_rate, l.rate_per, l.reducing_method, l.fixed_interest, l.fixed_interest_rate, l.frequency, l.installments, l.grace_periods, l.first_due_on, l.ends_on, l.late_fine, l.balance_fine, l.processing_fee, l.fine_deferment, l.next_balance_fine_on, l.is_bad_debt, l.description, l.settings, l.is_backdated, l.created_by, l.created_at, l.updated_at, l.voided_at, l.voided_by, l.debtor_id, l.meeting_id, coalesce(u.first_name || ' ' || u.last_name, dr.name)::text AS member_name,
        coalesce(lt.name, '')::text AS loan_type_name, coalesce(a.name, '')::text AS account_name
 FROM loans l
 LEFT JOIN memberships m ON m.id = l.membership_id
@@ -885,6 +887,7 @@ type GetLoanViewRow struct {
 	VoidedAt          *time.Time
 	VoidedBy          *int64
 	DebtorID          *int64
+	MeetingID         *int64
 	MemberName        string
 	LoanTypeName      string
 	AccountName       string
@@ -928,6 +931,7 @@ func (q *Queries) GetLoanView(ctx context.Context, arg GetLoanViewParams) (GetLo
 		&i.VoidedAt,
 		&i.VoidedBy,
 		&i.DebtorID,
+		&i.MeetingID,
 		&i.MemberName,
 		&i.LoanTypeName,
 		&i.AccountName,

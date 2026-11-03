@@ -29,6 +29,9 @@ var DumpTables = []string{
 	"debtors", "bank_loans", "debtor_loan_types", "debtor_loans", "debtor_loan_invoices",
 	"debtor_loan_repayments", "debtor_loan_guarantors",
 	"transaction_alerts", "online_payment_requests", "user_bank_pairings", "bank_user_role_pairings",
+	"asset_categories", "assets", "stocks", "stock_sales", "money_market_investments",
+	"meetings", "atttendance", "agenda", "any_other_business", "contribution_transfers", "notifications",
+	"billing_packages", "billing_invoices", "billing_payments",
 }
 
 // Options control how legacy values are mapped.
@@ -55,6 +58,10 @@ type Plan struct {
 	LoanTypes, Loans, LoanCharges, LoanRepayments, LoanGuarantors    [][]any
 	Debtors, BankLoans                                               [][]any
 	TransactionAlerts, PaymentRequests, BankUsers                    [][]any
+	AssetCategories, Assets, Stocks, StockSales, MoneyMarket         [][]any
+	Meetings, MeetingAttendance, MeetingItems                        [][]any
+	ContributionTransfers, Notifications                             [][]any
+	BillingPackages, BillingInvoices, BillingPayments                [][]any
 
 	Report Report
 }
@@ -195,7 +202,12 @@ func Transform(t Tables, roles []Row, opt Options, now time.Time) (*Plan, error)
 	p.accountEntries(t["transaction_statements"], ref, accounts, deposits, withdrawals, transfers, now)
 	requests := p.withdrawalRequests(t["withdrawal_requests"], ref, accounts, expense, now)
 	p.withdrawalApprovals(t["withdrawal_approval_requests"], ref, requests, now)
-	p.ledger(t["statements"], groups, members, contribs, deposits, fines, now)
+	p.investments(t, ref, now)
+	p.meetings(t, ref, now)
+	ctransfers := p.contributionTransfers(t["contribution_transfers"], ref, fines, loanSet, now)
+	p.notifications(t["notifications"], ref, now)
+	p.billing(t, ref, now)
+	p.ledger(t["statements"], groups, members, contribs, deposits, fines, ctransfers, now)
 	alerts := p.transactionAlerts(t["transaction_alerts"], ref, accounts, now)
 	p.paymentRequests(t["online_payment_requests"], ref, accounts, fines, loanSet, alerts, opt, now)
 	p.bankUsers(t["user_bank_pairings"], t["bank_user_role_pairings"], ref, now)
@@ -220,6 +232,11 @@ func Transform(t Tables, roles []Row, opt Options, now time.Time) (*Plan, error)
 		"loan_repayments": p.LoanRepayments, "loan_guarantors": p.LoanGuarantors,
 		"debtors": p.Debtors, "bank_loans": p.BankLoans,
 		"transaction_alerts": p.TransactionAlerts, "payment_requests": p.PaymentRequests, "bank_users": p.BankUsers,
+		"asset_categories": p.AssetCategories, "assets": p.Assets, "stocks": p.Stocks, "stock_sales": p.StockSales,
+		"money_market_investments": p.MoneyMarket, "meetings": p.Meetings, "meeting_attendance": p.MeetingAttendance,
+		"meeting_items": p.MeetingItems, "contribution_transfers": p.ContributionTransfers,
+		"notifications": p.Notifications, "billing_packages": p.BillingPackages,
+		"billing_invoices": p.BillingInvoices, "billing_payments": p.BillingPayments,
 	} {
 		p.Report.Imported[name] = len(rows)
 	}
@@ -713,7 +730,7 @@ func (p *Plan) fineRules(rows []Row, contribs map[int64]*contribution, now time.
 
 var LedgerCols = []string{"id", "legacy_id", "legacy_type", "group_id", "membership_id", "contribution_id",
 	"entry_type", "amount", "entry_date", "due_date", "description", "voided_at", "created_at", "is_backdated",
-	"deposit_id", "fine_category_id"}
+	"deposit_id", "fine_category_id", "contribution_transfer_id"}
 
 // LedgerTypes maps statements.transaction_type to ledger_entry_type.
 // See Transactions::$statement_transaction_names in the legacy code.
@@ -729,7 +746,7 @@ var LedgerTypes = map[int64]string{
 }
 
 func (p *Plan) ledger(rows []Row, groups map[int64]bool, members map[int64]int64, contribs map[int64]*contribution,
-	deposits, fineCategories map[int64]int64, now time.Time) {
+	deposits, fineCategories, transfers map[int64]int64, now time.Time) {
 	for _, r := range byID(rows) {
 		id, gid := r.Int("id"), r.Int("group_id")
 		typ := r.Int("transaction_type")
@@ -786,6 +803,7 @@ func (p *Plan) ledger(rows []Row, groups map[int64]bool, members map[int64]int64
 			clean(r.Str("description")), voided, created, r.Flag("is_a_back_dating_record"),
 			inGroup(p, "ledger_entries", "deposit_id", r, gid, deposits),
 			inGroup(p, "ledger_entries", "fine_category_id", r, gid, fineCategories),
+			inGroup(p, "ledger_entries", "contribution_transfer_id", r, gid, transfers),
 		})
 	}
 }

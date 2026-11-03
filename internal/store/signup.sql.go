@@ -208,7 +208,7 @@ func (q *Queries) CreateSignupGroup(ctx context.Context, arg CreateSignupGroupPa
 const createSignupUser = `-- name: CreateSignupUser :one
 INSERT INTO users (first_name, last_name, phone, email, password_hash, is_validated)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, legacy_id, first_name, middle_name, last_name, email, phone, id_number, password_hash, password_reset_required, is_active, last_login_at, created_at, updated_at, avatar, is_validated
+RETURNING id, legacy_id, first_name, middle_name, last_name, email, phone, id_number, password_hash, password_reset_required, is_active, last_login_at, created_at, updated_at, avatar, is_validated, mobile_token
 `
 
 type CreateSignupUserParams struct {
@@ -247,6 +247,7 @@ func (q *Queries) CreateSignupUser(ctx context.Context, arg CreateSignupUserPara
 		&i.UpdatedAt,
 		&i.Avatar,
 		&i.IsValidated,
+		&i.MobileToken,
 	)
 	return i, err
 }
