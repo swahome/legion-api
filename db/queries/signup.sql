@@ -20,7 +20,7 @@ WHERE id IN (
     LIMIT sqlc.arg(lim)
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, to_phone, body, attempts;
+RETURNING id, to_phone, body, attempts, group_id;
 
 -- name: MarkSMSSent :exec
 UPDATE sms_messages SET status = 'sent', sent_at = now(), provider_message_id = $2,

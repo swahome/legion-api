@@ -8,20 +8,116 @@ SELECT EXISTS (
 SELECT
     (SELECT count(*) FROM groups)::bigint AS groups,
     (SELECT count(*) FROM groups WHERE status = 'active')::bigint AS active_groups,
+    (SELECT count(*) FROM groups WHERE status = 'setup')::bigint AS setup_groups,
+    (SELECT count(*) FROM groups WHERE status = 'suspended')::bigint AS suspended_groups,
+    (SELECT count(*) FROM groups WHERE status = 'closed')::bigint AS closed_groups,
+    (SELECT count(*) FROM groups WHERE created_at >= date_trunc('day', now()))::bigint AS groups_today,
     (SELECT count(*) FROM users)::bigint AS users,
+    (SELECT count(*) FROM users WHERE created_at >= date_trunc('day', now()))::bigint AS users_today,
     (SELECT count(*) FROM users WHERE last_login_at > now() - interval '30 days')::bigint AS users_active_30d,
-    (SELECT count(*) FROM memberships WHERE status = 'active')::bigint AS memberships;
+    (SELECT count(*) FROM memberships WHERE status = 'active')::bigint AS memberships,
+    (SELECT count(*) FROM sms_messages)::bigint AS sms_total,
+    (SELECT count(*) FROM sms_messages WHERE status = 'sent' AND created_at >= date_trunc('day', now()))::bigint AS sms_sent_today,
+    (SELECT count(*) FROM sms_messages WHERE status IN ('queued', 'sending'))::bigint AS sms_queued,
+    (SELECT count(*) FROM sms_messages WHERE status = 'failed' AND created_at > now() - interval '7 days')::bigint AS sms_failed_7d,
+    (SELECT count(*) FROM transaction_alerts)::bigint AS transaction_alerts,
+    (SELECT count(*) FROM transaction_alerts WHERE group_id IS NULL)::bigint AS alerts_unassigned,
+    (SELECT count(*) FROM group_accounts WHERE kind = 'bank' AND is_verified AND NOT is_closed AND deleted_at IS NULL)::bigint AS accounts_connected,
+    (SELECT count(*) FROM payment_requests WHERE status = 'paid')::bigint AS payments_paid,
+    (SELECT coalesce(sum(amount), 0) FROM payment_requests WHERE status = 'paid')::text AS payments_paid_amount,
+    (SELECT count(*) FROM ledger_entries WHERE entry_type = 'contribution_invoice' AND legacy_id IS NULL
+        AND voided_at IS NULL AND created_at >= date_trunc('day', now()))::bigint AS invoices_today,
+    (SELECT count(*) FROM ledger_entries WHERE entry_type IN ('contribution_fine_invoice', 'fine_invoice') AND legacy_id IS NULL
+        AND voided_at IS NULL AND created_at >= date_trunc('day', now()))::bigint AS fine_invoices_today,
+    (SELECT count(*) FROM withdrawal_requests WHERE status IN ('pending', 'approved'))::bigint AS open_withdrawal_requests,
+    (SELECT count(*) FROM admin_audit_log)::bigint AS audit_entries;
 
 -- name: AdminListGroups :many
+-- view: '' (all), 'inactive' (active groups no member has signed in to for
+-- 90 days: candidates for archiving). sort: 'name' or 'newest'.
 SELECT g.id, g.legacy_id, g.name, g.slug, g.status, g.currency, g.country_code, g.created_at,
-       (SELECT count(*) FROM memberships m WHERE m.group_id = g.id AND m.status = 'active')::bigint AS active_members,
+       g.email AS group_email, g.phone AS group_phone,
+       st.active_members, st.registered_members, ls.last_login_at AS last_seen_at,
+       coalesce(c.id, 0)::bigint AS contact_id,
+       coalesce(c.first_name || ' ' || c.last_name, '')::text AS contact_name,
+       c.phone AS contact_phone, c.email AS contact_email,
        count(*) OVER ()::bigint AS total
 FROM groups g
+LEFT JOIN users c ON c.id = coalesce(g.owner_user_id, g.created_by)
+CROSS JOIN LATERAL (
+    SELECT count(*) FILTER (WHERE m.status = 'active')::bigint AS active_members,
+           count(*) FILTER (WHERE m.status = 'active' AND u.last_login_at IS NOT NULL)::bigint AS registered_members
+    FROM memberships m JOIN users u ON u.id = m.user_id
+    WHERE m.group_id = g.id
+) st
+LEFT JOIN LATERAL (
+    SELECT u.last_login_at FROM memberships m JOIN users u ON u.id = m.user_id
+    WHERE m.group_id = g.id AND u.last_login_at IS NOT NULL
+    ORDER BY u.last_login_at DESC LIMIT 1
+) ls ON true
 WHERE (sqlc.narg(status)::group_status IS NULL OR g.status = sqlc.narg(status))
   AND (sqlc.narg(search)::text IS NULL OR g.name ILIKE '%' || sqlc.narg(search) || '%'
-       OR g.id::text = sqlc.narg(search))
-ORDER BY g.name, g.id
+       OR g.id::text = sqlc.narg(search)
+       OR c.phone ILIKE '%' || sqlc.narg(search) || '%'
+       OR g.phone ILIKE '%' || sqlc.narg(search) || '%')
+  AND (sqlc.arg(view)::text <> 'inactive'
+       OR (g.status = 'active' AND (ls.last_login_at IS NULL OR ls.last_login_at < now() - interval '90 days')))
+ORDER BY CASE WHEN sqlc.arg(sort)::text = 'newest' THEN g.created_at END DESC,
+         g.name, g.id
 LIMIT sqlc.arg(page_size) OFFSET sqlc.arg(page_offset);
+
+-- name: AdminGetGroup :one
+SELECT g.id, g.legacy_id, g.name, g.slug, g.status, g.currency, g.country_code, g.timezone,
+       g.email, g.phone, g.address, g.created_at, g.updated_at, g.settings,
+       coalesce(c.id, 0)::bigint AS contact_id,
+       coalesce(c.first_name || ' ' || c.last_name, '')::text AS contact_name,
+       c.phone AS contact_phone, c.email AS contact_email,
+       coalesce(cb.first_name || ' ' || cb.last_name, '')::text AS created_by_name,
+       (SELECT count(*) FROM memberships m WHERE m.group_id = g.id AND m.status = 'active')::bigint AS active_members,
+       (SELECT count(*) FROM memberships m JOIN users u ON u.id = m.user_id
+         WHERE m.group_id = g.id AND m.status = 'active' AND u.last_login_at IS NOT NULL)::bigint AS registered_members,
+       ls.last_login_at AS last_seen_at,
+       (SELECT count(*) FROM contributions x WHERE x.group_id = g.id AND x.deleted_at IS NULL)::bigint AS contributions,
+       (SELECT count(*) FROM group_accounts x WHERE x.group_id = g.id AND x.deleted_at IS NULL)::bigint AS accounts,
+       (SELECT count(*) FROM loans x WHERE x.group_id = g.id)::bigint AS loans
+FROM groups g
+LEFT JOIN users c ON c.id = coalesce(g.owner_user_id, g.created_by)
+LEFT JOIN users cb ON cb.id = g.created_by
+LEFT JOIN LATERAL (
+    SELECT u.last_login_at FROM memberships m JOIN users u ON u.id = m.user_id
+    WHERE m.group_id = g.id AND u.last_login_at IS NOT NULL
+    ORDER BY u.last_login_at DESC LIMIT 1
+) ls ON true
+WHERE g.id = $1;
+
+-- name: AdminUpdateGroupProfile :one
+UPDATE groups SET
+    name = coalesce(sqlc.narg(name), name),
+    email = CASE WHEN sqlc.arg(set_email)::bool THEN sqlc.narg(email) ELSE email END,
+    phone = CASE WHEN sqlc.arg(set_phone)::bool THEN sqlc.narg(phone) ELSE phone END,
+    settings = CASE WHEN sqlc.narg(notifications_off)::bool IS NULL THEN settings
+                    ELSE jsonb_set(settings, '{disable_notifications}',
+                                   to_jsonb(CASE WHEN sqlc.narg(notifications_off)::bool THEN '1' ELSE '0' END)) END,
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+RETURNING id;
+
+-- name: GroupNotificationsOff :one
+SELECT coalesce(settings->>'disable_notifications', '0') IN ('1', 'true')
+FROM groups WHERE id = $1;
+
+-- name: AdminRoleCounts :many
+SELECT r.role::text AS role, count(*)::bigint AS users
+FROM user_platform_roles r JOIN users u ON u.id = r.user_id
+WHERE u.is_active
+GROUP BY r.role ORDER BY r.role;
+
+-- name: AdminUsersGroupNames :many
+-- The groups of each user on a page of the user list.
+SELECT m.user_id, m.group_id, g.name AS group_name, m.is_official
+FROM memberships m JOIN groups g ON g.id = m.group_id
+WHERE m.user_id = ANY(sqlc.arg(user_ids)::bigint[]) AND m.status = 'active'
+ORDER BY m.user_id, g.name;
 
 -- name: SetGroupStatus :one
 UPDATE groups SET status = $2, updated_at = now() WHERE id = $1 RETURNING *;

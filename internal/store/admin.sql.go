@@ -63,42 +63,163 @@ func (q *Queries) AdminCreateUser(ctx context.Context, arg AdminCreateUserParams
 	return i, err
 }
 
+const adminGetGroup = `-- name: AdminGetGroup :one
+SELECT g.id, g.legacy_id, g.name, g.slug, g.status, g.currency, g.country_code, g.timezone,
+       g.email, g.phone, g.address, g.created_at, g.updated_at, g.settings,
+       coalesce(c.id, 0)::bigint AS contact_id,
+       coalesce(c.first_name || ' ' || c.last_name, '')::text AS contact_name,
+       c.phone AS contact_phone, c.email AS contact_email,
+       coalesce(cb.first_name || ' ' || cb.last_name, '')::text AS created_by_name,
+       (SELECT count(*) FROM memberships m WHERE m.group_id = g.id AND m.status = 'active')::bigint AS active_members,
+       (SELECT count(*) FROM memberships m JOIN users u ON u.id = m.user_id
+         WHERE m.group_id = g.id AND m.status = 'active' AND u.last_login_at IS NOT NULL)::bigint AS registered_members,
+       ls.last_login_at AS last_seen_at,
+       (SELECT count(*) FROM contributions x WHERE x.group_id = g.id AND x.deleted_at IS NULL)::bigint AS contributions,
+       (SELECT count(*) FROM group_accounts x WHERE x.group_id = g.id AND x.deleted_at IS NULL)::bigint AS accounts,
+       (SELECT count(*) FROM loans x WHERE x.group_id = g.id)::bigint AS loans
+FROM groups g
+LEFT JOIN users c ON c.id = coalesce(g.owner_user_id, g.created_by)
+LEFT JOIN users cb ON cb.id = g.created_by
+LEFT JOIN LATERAL (
+    SELECT u.last_login_at FROM memberships m JOIN users u ON u.id = m.user_id
+    WHERE m.group_id = g.id AND u.last_login_at IS NOT NULL
+    ORDER BY u.last_login_at DESC LIMIT 1
+) ls ON true
+WHERE g.id = $1
+`
+
+type AdminGetGroupRow struct {
+	ID                int64
+	LegacyID          *int32
+	Name              string
+	Slug              string
+	Status            GroupStatus
+	Currency          string
+	CountryCode       string
+	Timezone          string
+	Email             *string
+	Phone             *string
+	Address           *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	Settings          []byte
+	ContactID         int64
+	ContactName       string
+	ContactPhone      *string
+	ContactEmail      *string
+	CreatedByName     string
+	ActiveMembers     int64
+	RegisteredMembers int64
+	LastSeenAt        *time.Time
+	Contributions     int64
+	Accounts          int64
+	Loans             int64
+}
+
+func (q *Queries) AdminGetGroup(ctx context.Context, id int64) (AdminGetGroupRow, error) {
+	row := q.db.QueryRow(ctx, adminGetGroup, id)
+	var i AdminGetGroupRow
+	err := row.Scan(
+		&i.ID,
+		&i.LegacyID,
+		&i.Name,
+		&i.Slug,
+		&i.Status,
+		&i.Currency,
+		&i.CountryCode,
+		&i.Timezone,
+		&i.Email,
+		&i.Phone,
+		&i.Address,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Settings,
+		&i.ContactID,
+		&i.ContactName,
+		&i.ContactPhone,
+		&i.ContactEmail,
+		&i.CreatedByName,
+		&i.ActiveMembers,
+		&i.RegisteredMembers,
+		&i.LastSeenAt,
+		&i.Contributions,
+		&i.Accounts,
+		&i.Loans,
+	)
+	return i, err
+}
+
 const adminListGroups = `-- name: AdminListGroups :many
 SELECT g.id, g.legacy_id, g.name, g.slug, g.status, g.currency, g.country_code, g.created_at,
-       (SELECT count(*) FROM memberships m WHERE m.group_id = g.id AND m.status = 'active')::bigint AS active_members,
+       g.email AS group_email, g.phone AS group_phone,
+       st.active_members, st.registered_members, ls.last_login_at AS last_seen_at,
+       coalesce(c.id, 0)::bigint AS contact_id,
+       coalesce(c.first_name || ' ' || c.last_name, '')::text AS contact_name,
+       c.phone AS contact_phone, c.email AS contact_email,
        count(*) OVER ()::bigint AS total
 FROM groups g
+LEFT JOIN users c ON c.id = coalesce(g.owner_user_id, g.created_by)
+CROSS JOIN LATERAL (
+    SELECT count(*) FILTER (WHERE m.status = 'active')::bigint AS active_members,
+           count(*) FILTER (WHERE m.status = 'active' AND u.last_login_at IS NOT NULL)::bigint AS registered_members
+    FROM memberships m JOIN users u ON u.id = m.user_id
+    WHERE m.group_id = g.id
+) st
+LEFT JOIN LATERAL (
+    SELECT u.last_login_at FROM memberships m JOIN users u ON u.id = m.user_id
+    WHERE m.group_id = g.id AND u.last_login_at IS NOT NULL
+    ORDER BY u.last_login_at DESC LIMIT 1
+) ls ON true
 WHERE ($1::group_status IS NULL OR g.status = $1)
   AND ($2::text IS NULL OR g.name ILIKE '%' || $2 || '%'
-       OR g.id::text = $2)
-ORDER BY g.name, g.id
-LIMIT $4 OFFSET $3
+       OR g.id::text = $2
+       OR c.phone ILIKE '%' || $2 || '%'
+       OR g.phone ILIKE '%' || $2 || '%')
+  AND ($3::text <> 'inactive'
+       OR (g.status = 'active' AND (ls.last_login_at IS NULL OR ls.last_login_at < now() - interval '90 days')))
+ORDER BY CASE WHEN $4::text = 'newest' THEN g.created_at END DESC,
+         g.name, g.id
+LIMIT $6 OFFSET $5
 `
 
 type AdminListGroupsParams struct {
 	Status     NullGroupStatus
 	Search     *string
+	View       string
+	Sort       string
 	PageOffset int32
 	PageSize   int32
 }
 
 type AdminListGroupsRow struct {
-	ID            int64
-	LegacyID      *int32
-	Name          string
-	Slug          string
-	Status        GroupStatus
-	Currency      string
-	CountryCode   string
-	CreatedAt     time.Time
-	ActiveMembers int64
-	Total         int64
+	ID                int64
+	LegacyID          *int32
+	Name              string
+	Slug              string
+	Status            GroupStatus
+	Currency          string
+	CountryCode       string
+	CreatedAt         time.Time
+	GroupEmail        *string
+	GroupPhone        *string
+	ActiveMembers     int64
+	RegisteredMembers int64
+	LastSeenAt        *time.Time
+	ContactID         int64
+	ContactName       string
+	ContactPhone      *string
+	ContactEmail      *string
+	Total             int64
 }
 
+// view: ” (all), 'inactive' (active groups no member has signed in to for
+// 90 days: candidates for archiving). sort: 'name' or 'newest'.
 func (q *Queries) AdminListGroups(ctx context.Context, arg AdminListGroupsParams) ([]AdminListGroupsRow, error) {
 	rows, err := q.db.Query(ctx, adminListGroups,
 		arg.Status,
 		arg.Search,
+		arg.View,
+		arg.Sort,
 		arg.PageOffset,
 		arg.PageSize,
 	)
@@ -118,7 +239,15 @@ func (q *Queries) AdminListGroups(ctx context.Context, arg AdminListGroupsParams
 			&i.Currency,
 			&i.CountryCode,
 			&i.CreatedAt,
+			&i.GroupEmail,
+			&i.GroupPhone,
 			&i.ActiveMembers,
+			&i.RegisteredMembers,
+			&i.LastSeenAt,
+			&i.ContactID,
+			&i.ContactName,
+			&i.ContactPhone,
+			&i.ContactEmail,
 			&i.Total,
 		); err != nil {
 			return nil, err
@@ -301,21 +430,91 @@ func (q *Queries) AdminListUsers(ctx context.Context, arg AdminListUsersParams) 
 	return items, nil
 }
 
+const adminRoleCounts = `-- name: AdminRoleCounts :many
+SELECT r.role::text AS role, count(*)::bigint AS users
+FROM user_platform_roles r JOIN users u ON u.id = r.user_id
+WHERE u.is_active
+GROUP BY r.role ORDER BY r.role
+`
+
+type AdminRoleCountsRow struct {
+	Role  string
+	Users int64
+}
+
+func (q *Queries) AdminRoleCounts(ctx context.Context) ([]AdminRoleCountsRow, error) {
+	rows, err := q.db.Query(ctx, adminRoleCounts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AdminRoleCountsRow{}
+	for rows.Next() {
+		var i AdminRoleCountsRow
+		if err := rows.Scan(&i.Role, &i.Users); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const adminStats = `-- name: AdminStats :one
 SELECT
     (SELECT count(*) FROM groups)::bigint AS groups,
     (SELECT count(*) FROM groups WHERE status = 'active')::bigint AS active_groups,
+    (SELECT count(*) FROM groups WHERE status = 'setup')::bigint AS setup_groups,
+    (SELECT count(*) FROM groups WHERE status = 'suspended')::bigint AS suspended_groups,
+    (SELECT count(*) FROM groups WHERE status = 'closed')::bigint AS closed_groups,
+    (SELECT count(*) FROM groups WHERE created_at >= date_trunc('day', now()))::bigint AS groups_today,
     (SELECT count(*) FROM users)::bigint AS users,
+    (SELECT count(*) FROM users WHERE created_at >= date_trunc('day', now()))::bigint AS users_today,
     (SELECT count(*) FROM users WHERE last_login_at > now() - interval '30 days')::bigint AS users_active_30d,
-    (SELECT count(*) FROM memberships WHERE status = 'active')::bigint AS memberships
+    (SELECT count(*) FROM memberships WHERE status = 'active')::bigint AS memberships,
+    (SELECT count(*) FROM sms_messages)::bigint AS sms_total,
+    (SELECT count(*) FROM sms_messages WHERE status = 'sent' AND created_at >= date_trunc('day', now()))::bigint AS sms_sent_today,
+    (SELECT count(*) FROM sms_messages WHERE status IN ('queued', 'sending'))::bigint AS sms_queued,
+    (SELECT count(*) FROM sms_messages WHERE status = 'failed' AND created_at > now() - interval '7 days')::bigint AS sms_failed_7d,
+    (SELECT count(*) FROM transaction_alerts)::bigint AS transaction_alerts,
+    (SELECT count(*) FROM transaction_alerts WHERE group_id IS NULL)::bigint AS alerts_unassigned,
+    (SELECT count(*) FROM group_accounts WHERE kind = 'bank' AND is_verified AND NOT is_closed AND deleted_at IS NULL)::bigint AS accounts_connected,
+    (SELECT count(*) FROM payment_requests WHERE status = 'paid')::bigint AS payments_paid,
+    (SELECT coalesce(sum(amount), 0) FROM payment_requests WHERE status = 'paid')::text AS payments_paid_amount,
+    (SELECT count(*) FROM ledger_entries WHERE entry_type = 'contribution_invoice' AND legacy_id IS NULL
+        AND voided_at IS NULL AND created_at >= date_trunc('day', now()))::bigint AS invoices_today,
+    (SELECT count(*) FROM ledger_entries WHERE entry_type IN ('contribution_fine_invoice', 'fine_invoice') AND legacy_id IS NULL
+        AND voided_at IS NULL AND created_at >= date_trunc('day', now()))::bigint AS fine_invoices_today,
+    (SELECT count(*) FROM withdrawal_requests WHERE status IN ('pending', 'approved'))::bigint AS open_withdrawal_requests,
+    (SELECT count(*) FROM admin_audit_log)::bigint AS audit_entries
 `
 
 type AdminStatsRow struct {
-	Groups         int64
-	ActiveGroups   int64
-	Users          int64
-	UsersActive30d int64
-	Memberships    int64
+	Groups                 int64
+	ActiveGroups           int64
+	SetupGroups            int64
+	SuspendedGroups        int64
+	ClosedGroups           int64
+	GroupsToday            int64
+	Users                  int64
+	UsersToday             int64
+	UsersActive30d         int64
+	Memberships            int64
+	SmsTotal               int64
+	SmsSentToday           int64
+	SmsQueued              int64
+	SmsFailed7d            int64
+	TransactionAlerts      int64
+	AlertsUnassigned       int64
+	AccountsConnected      int64
+	PaymentsPaid           int64
+	PaymentsPaidAmount     string
+	InvoicesToday          int64
+	FineInvoicesToday      int64
+	OpenWithdrawalRequests int64
+	AuditEntries           int64
 }
 
 func (q *Queries) AdminStats(ctx context.Context) (AdminStatsRow, error) {
@@ -324,11 +523,67 @@ func (q *Queries) AdminStats(ctx context.Context) (AdminStatsRow, error) {
 	err := row.Scan(
 		&i.Groups,
 		&i.ActiveGroups,
+		&i.SetupGroups,
+		&i.SuspendedGroups,
+		&i.ClosedGroups,
+		&i.GroupsToday,
 		&i.Users,
+		&i.UsersToday,
 		&i.UsersActive30d,
 		&i.Memberships,
+		&i.SmsTotal,
+		&i.SmsSentToday,
+		&i.SmsQueued,
+		&i.SmsFailed7d,
+		&i.TransactionAlerts,
+		&i.AlertsUnassigned,
+		&i.AccountsConnected,
+		&i.PaymentsPaid,
+		&i.PaymentsPaidAmount,
+		&i.InvoicesToday,
+		&i.FineInvoicesToday,
+		&i.OpenWithdrawalRequests,
+		&i.AuditEntries,
 	)
 	return i, err
+}
+
+const adminUpdateGroupProfile = `-- name: AdminUpdateGroupProfile :one
+UPDATE groups SET
+    name = coalesce($1, name),
+    email = CASE WHEN $2::bool THEN $3 ELSE email END,
+    phone = CASE WHEN $4::bool THEN $5 ELSE phone END,
+    settings = CASE WHEN $6::bool IS NULL THEN settings
+                    ELSE jsonb_set(settings, '{disable_notifications}',
+                                   to_jsonb(CASE WHEN $6::bool THEN '1' ELSE '0' END)) END,
+    updated_at = now()
+WHERE id = $7
+RETURNING id
+`
+
+type AdminUpdateGroupProfileParams struct {
+	Name             *string
+	SetEmail         bool
+	Email            *string
+	SetPhone         bool
+	Phone            *string
+	NotificationsOff *bool
+	ID               int64
+}
+
+func (q *Queries) AdminUpdateGroupProfile(ctx context.Context, arg AdminUpdateGroupProfileParams) (int64, error) {
+	row := q.db.QueryRow(ctx, adminUpdateGroupProfile,
+		arg.Name,
+		arg.SetEmail,
+		arg.Email,
+		arg.SetPhone,
+		arg.Phone,
+		arg.NotificationsOff,
+		arg.ID,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const adminUpdateUser = `-- name: AdminUpdateUser :one
@@ -441,6 +696,46 @@ func (q *Queries) AdminUserMemberships(ctx context.Context, userID int64) ([]Adm
 	return items, nil
 }
 
+const adminUsersGroupNames = `-- name: AdminUsersGroupNames :many
+SELECT m.user_id, m.group_id, g.name AS group_name, m.is_official
+FROM memberships m JOIN groups g ON g.id = m.group_id
+WHERE m.user_id = ANY($1::bigint[]) AND m.status = 'active'
+ORDER BY m.user_id, g.name
+`
+
+type AdminUsersGroupNamesRow struct {
+	UserID     int64
+	GroupID    int64
+	GroupName  string
+	IsOfficial bool
+}
+
+// The groups of each user on a page of the user list.
+func (q *Queries) AdminUsersGroupNames(ctx context.Context, userIds []int64) ([]AdminUsersGroupNamesRow, error) {
+	rows, err := q.db.Query(ctx, adminUsersGroupNames, userIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AdminUsersGroupNamesRow{}
+	for rows.Next() {
+		var i AdminUsersGroupNamesRow
+		if err := rows.Scan(
+			&i.UserID,
+			&i.GroupID,
+			&i.GroupName,
+			&i.IsOfficial,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const clearPlatformRoles = `-- name: ClearPlatformRoles :exec
 DELETE FROM user_platform_roles WHERE user_id = $1
 `
@@ -460,6 +755,18 @@ func (q *Queries) CountActiveAdmins(ctx context.Context) (int64, error) {
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const groupNotificationsOff = `-- name: GroupNotificationsOff :one
+SELECT coalesce(settings->>'disable_notifications', '0') IN ('1', 'true')
+FROM groups WHERE id = $1
+`
+
+func (q *Queries) GroupNotificationsOff(ctx context.Context, id int64) (bool, error) {
+	row := q.db.QueryRow(ctx, groupNotificationsOff, id)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const insertAudit = `-- name: InsertAudit :exec

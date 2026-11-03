@@ -20,7 +20,7 @@ WHERE id IN (
     LIMIT $1
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, to_phone, body, attempts
+RETURNING id, to_phone, body, attempts, group_id
 `
 
 type ClaimDueSMSRow struct {
@@ -28,6 +28,7 @@ type ClaimDueSMSRow struct {
 	ToPhone  string
 	Body     string
 	Attempts int32
+	GroupID  *int64
 }
 
 // Takes up to `lim` messages that are due, including any left 'sending' by
@@ -47,6 +48,7 @@ func (q *Queries) ClaimDueSMS(ctx context.Context, lim int32) ([]ClaimDueSMSRow,
 			&i.ToPhone,
 			&i.Body,
 			&i.Attempts,
+			&i.GroupID,
 		); err != nil {
 			return nil, err
 		}
