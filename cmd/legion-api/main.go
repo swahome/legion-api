@@ -36,6 +36,7 @@ import (
 	"github.com/swahome/legion-api/internal/database"
 	"github.com/swahome/legion-api/internal/httpapi"
 	"github.com/swahome/legion-api/internal/legacy"
+	"github.com/swahome/legion-api/internal/mail"
 	"github.com/swahome/legion-api/internal/mobile"
 	"github.com/swahome/legion-api/internal/payments"
 	"github.com/swahome/legion-api/internal/sms"
@@ -162,7 +163,23 @@ func serve() error {
 		if err != nil {
 			return err
 		}
-		api.WithMobile(mobile.New(pool, keys, authSvc, mobile.SMSOTP{Pool: pool, Kick: dispatcher.Kick}).WithAccounts(acct, dispatcher.Kick).WithPayments(pay).Routes())
+		var mailer mail.Sender
+		if cfg.SMTPHost != "" {
+			mailer = mail.SMTP{Host: cfg.SMTPHost, Port: cfg.SMTPPort, User: cfg.SMTPUser, Password: cfg.SMTPPassword, From: cfg.SMTPFrom}
+		} else {
+			slog.Warn("email: LEGION_SMTP_HOST not set, statements members ask to have emailed are not sent")
+		}
+		if cfg.PublicURL == "" {
+			slog.Warn("mobile: LEGION_PUBLIC_URL (or LEGION_WEB_URL) not set, statement download links will be relative")
+		}
+		app := mobile.New(pool, keys, authSvc, mobile.SMSOTP{Pool: pool, Kick: dispatcher.Kick}).WithAccounts(acct, dispatcher.Kick).
+			WithPayments(pay).WithUploads(cfg.UploadsDir).
+			WithStatements(strings.TrimRight(cfg.PublicURL, "/")+"/v1/legacy/uploads", mailer, slog.Default())
+		if cfg.ChamasoftFake {
+			app.WithBankLinker(mobile.FakeBankLinker{})
+		}
+		go app.RunStatements(ctx)
+		api.WithMobile(app.Routes())
 		slog.Info("mobile app API on /v1/legacy")
 	}
 	srv := &http.Server{

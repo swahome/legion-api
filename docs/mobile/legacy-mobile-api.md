@@ -55,6 +55,8 @@ If any released build of the app relies on the fixed token, we need to know befo
 
 ## Endpoints by milestone
 
+With milestone 8 every action below is served, except the ones `docs/api/mobile.md` lists under "Old actions not served" and "Deliberately not carried over".
+
 ### Milestone 2: Role panels and platform admin (112 actions)
 
 | Path | Request fields (besides user_id, group_id, request_id) |

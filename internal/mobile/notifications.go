@@ -31,14 +31,17 @@ func notify(ctx context.Context, q *store.Queries, groupID, membershipID int64, 
 		Subject: subject, Message: message, Category: category, CallToAction: "View", Refs: b}
 	if file != nil {
 		p.FilePath, p.FileType, p.FileSize = file.path, file.kind, &file.size
+		if file.cta != "" {
+			p.CallToAction = file.cta
+		}
 	}
 	_, err := q.CreateNotification(ctx, p)
 	return err
 }
 
 type notificationFile struct {
-	path, kind string
-	size       int64
+	path, kind, cta string
+	size            int64
 }
 
 // notifyGroup writes the same notification to every active member.

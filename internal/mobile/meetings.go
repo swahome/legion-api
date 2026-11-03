@@ -56,7 +56,7 @@ var attendanceLists = []struct {
 
 // meetingTime reads the meeting's date and time as the group's local time.
 func meetingTime(v string, loc *time.Location) *time.Time {
-	for _, l := range []string{"2006-01-02 15:04:05", "2006-01-02 15:04", "2006-01-02T15:04:05", "2006-01-02T15:04"} {
+	for _, l := range []string{"2006-01-02 15:04:05", "2006-01-02 15:04", "2006-01-02T15:04:05", "2006-01-02T15:04", "02-01-2006 15:04:05", "02-01-2006 15:04"} {
 		if t, err := time.ParseInLocation(l, v, loc); err == nil {
 			return &t
 		}

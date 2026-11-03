@@ -6,12 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"mime/multipart"
 	"log/slog"
+	"mime/multipart"
 	"net"
 	"net/http"
-	"os"
 	"net/netip"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +22,7 @@ import (
 
 	"github.com/swahome/legion-api/internal/account"
 	"github.com/swahome/legion-api/internal/auth"
+	"github.com/swahome/legion-api/internal/mail"
 	"github.com/swahome/legion-api/internal/payments"
 	"github.com/swahome/legion-api/internal/store"
 )
@@ -49,8 +50,14 @@ type Server struct {
 	smsKick func()
 	pay     *payments.Service
 	uploads string // folder for photos and statements (LEGION_UPLOADS_DIR)
-	now     func() time.Time
-	actions map[string]action
+	// Statement files: their public address, email, and the worker's wake-up.
+	publicUploads string
+	mailer        mail.Sender
+	log           *slog.Logger
+	statementKick chan struct{}
+	banks         BankLinker
+	now           func() time.Time
+	actions       map[string]action
 }
 
 // WithAccounts sets the sign-up settings and the hook that wakes the SMS
@@ -79,7 +86,7 @@ type call struct {
 	userID  int64 // from the access token; 0 on public actions
 	r       *http.Request
 	version int
-	debtors bool // a debtor_loan_types action: the same handlers, on the types offered to debtors
+	debtors bool                               // a debtor_loan_types action: the same handlers, on the types offered to debtors
 	files   map[string][]*multipart.FileHeader // a photo upload's files
 }
 
@@ -88,7 +95,7 @@ func New(pool *pgxpool.Pool, keys *Keys, authSvc *auth.Service, otp OTPSender) *
 		otp = noOTPSender{}
 	}
 	s := &Server{pool: pool, q: store.New(pool), keys: keys, auth: authSvc, otp: otp, now: time.Now,
-		acct: &account.Service{}, smsKick: func() {}}
+		acct: &account.Service{}, smsKick: func() {}, statementKick: make(chan struct{}, 1)}
 	s.actions = map[string]action{
 		"login":                 {public: true, fn: s.login},
 		"generate_pin":          {public: true, fn: s.generatePin},
@@ -290,12 +297,15 @@ func (s *Server) Routes() http.Handler {
 	r := chi.NewRouter()
 	r.Post("/mobile/{action}", s.serve)
 	r.Post("/mobile/{module}/{action}", s.serve)
-	if s.uploads != "" {
-		// Photos (uploads/groups/<file>) and statement files, as the legacy
-		// site served them. No directory listings.
-		files := http.StripPrefix("/uploads/", http.FileServer(noListing{http.Dir(s.uploads)}))
-		r.Get("/uploads/*", files.ServeHTTP)
-	}
+	// Photos (uploads/groups/<file>) and statement files, as the legacy
+	// site served them. No directory listings.
+	r.Get("/uploads/*", func(w http.ResponseWriter, r *http.Request) {
+		if s.uploads == "" {
+			http.NotFound(w, r)
+			return
+		}
+		http.StripPrefix("/uploads/", http.FileServer(noListing{http.Dir(s.uploads)})).ServeHTTP(w, r)
+	})
 	return r
 }
 

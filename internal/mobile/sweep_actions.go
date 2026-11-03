@@ -9,6 +9,7 @@ func (s *Server) addSweepActions() {
 	g := func(fn groupFn) action { return action{fn: s.groupAction(6, fn)} }
 	u := func(fn func(context.Context, *call) (any, error)) action { return action{fn: s.userAction(fn)} }
 	off := func(fn groupFn) action { return action{fn: s.groupAction(6, s.officialsOnly(fn))} }
+	active := func(fn groupFn) action { return action{fn: s.groupAction(0, s.activeOnly(fn))} }
 	for name, a := range map[string]action{
 		// Assets.
 		"asset_categories/get_group_asset_categories": g(s.getGroupAssetCategories),
@@ -102,6 +103,44 @@ func (s *Server) addSweepActions() {
 		"contributions/unhide":                         off(s.hideContribution(false)),
 		"contributions/delete":                         off(s.deleteContribution),
 		"contributions/get_group_contributions_to_pay": g(s.getGroupContributionsToPay),
+
+		// Dashboards, charts and reports.
+		"get_member_dashboard":                active(s.getMemberDashboard),
+		"get_group_more_dashboard_data":       active(s.getGroupMoreDashboardData),
+		"get_group_bank_balances":             active(s.getGroupBankBalances),
+		"get_group_member_fines_summary":      active(s.getGroupMemberFinesSummary),
+		"get_member_and_group_chart_data":     active(s.memberAndGroupChart(false)),
+		"get_ios_member_and_group_chart_data": active(s.memberAndGroupChart(true)),
+		"reports/account_balances":            {fn: s.groupAction(6, s.accountBalances)},
+		"statements/fine_statement":           {fn: s.groupAction(0, s.fineStatement)},
+		"statements/total_group_savings":      {fn: s.groupAction(0, s.totalGroupSavings)},
+		"statements/download_statement":       {fn: s.groupAction(0, s.requestStatement(statementByDownload))},
+		"statements/send_email_statement":     {fn: s.groupAction(0, s.requestStatement(statementByEmail))},
+
+		// Subscription billing: history only, everyone on the free plan.
+		"billing/get_group_billing_invoices": off(s.getGroupBillingInvoices),
+		"billing/get_group_billing_payments": off(s.getGroupBillingPayments),
+		"billing/get_group_amount_payables":  g(s.getGroupAmountPayable),
+		"billing/get_group_amount_payable":   g(s.getGroupAmountPayable),
+		"billing/make_mpesa_payment":         g(s.noBillingPayment),
+		"billing/receive_complete_billing":   g(s.noBillingPayment),
+		"billing/confirm_free_billing":       {fn: s.groupAction(5, s.confirmFreeBilling)},
+		"billing/calculate_conversion":       u(s.calculateConversion),
+
+		// Bank accounts linked to their bank's alerts, and payments.
+		"bank_accounts/connect":                           off(s.connectBankAccount),
+		"bank_accounts/verify":                            off(s.verifyBankAccount),
+		"bank_accounts/disconnect":                        off(s.disconnectBankAccount),
+		"bank_accounts/activate_wallet":                   off(s.activateWallet),
+		"deposits/calculate_convenience_charge":           g(s.calculateConvenienceCharge),
+		"deposits/make_group_payment_old_old":             g(s.makeGroupPayment),
+		"deposits/make_new_group_payment_copy":            g(s.makeGroupPayment),
+		"deposits/make_new_group_payment_old":             g(s.makeGroupPayment),
+		"deposits/make_payment_to_group_bank_express_old": g(s.makeGroupPayment),
+
+		// Push notifications are not sent (see notifications.go).
+		"send_push_notifications":   u(s.pushNotSent),
+		"notifications/create_test": u(s.pushNotSent),
 	} {
 		if _, dup := s.actions[name]; dup {
 			panic("mobile: action registered twice: " + name)

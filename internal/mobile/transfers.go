@@ -125,7 +125,9 @@ func (s *Server) voidContributionTransfer(ctx context.Context, c *call, g *membe
 	if id == nil {
 		return timed(status(0, "Contribution transfer details are missing"), s.now()), nil
 	}
-	err := s.inTx(ctx, func(q *store.Queries) error { return books.VoidContributionTransfer(ctx, q, g.group.ID, g.user.ID, *id) })
+	err := s.inTx(ctx, func(q *store.Queries) error {
+		return books.VoidContributionTransfer(ctx, q, g.group.ID, g.user.ID, *id)
+	})
 	if be, ok := asBooksError(err); ok {
 		if be.Code == "not_found" || be.Code == "already_voided" {
 			return timed(status(0, "Could not find contribution transfer details"), s.now()), nil
