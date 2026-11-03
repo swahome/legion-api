@@ -84,15 +84,23 @@ func (s *Server) getMemberDashboardData(ctx context.Context, c *call, g *member)
 	if err != nil {
 		return nil, err
 	}
+	unread, err := s.unreadCount(ctx, g)
+	if err != nil {
+		return nil, err
+	}
+	partner, deps, wds, err := s.alertSummary(ctx, g)
+	if err != nil {
+		return nil, err
+	}
 	return map[string]any{
 		"status":                         1,
 		"time":                           s.now().Unix(),
 		"role":                           role,
 		"member_id":                      fmt.Sprint(g.m.ID),
-		"notification_count":             0,
-		"unreconciled_deposits_count":    0,
-		"unreconciled_withdrawals_count": 0,
-		"partner":                        0,
+		"notification_count":             unread,
+		"unreconciled_deposits_count":    deps,
+		"unreconciled_withdrawals_count": wds,
+		"partner":                        partner,
 		"member_details": map[string]any{
 			"total_contributions":         t.contributions,
 			"total_fines":                 t.fines,
@@ -163,6 +171,14 @@ func (s *Server) getGroupDashboardData(ctx context.Context, c *call, g *member) 
 	if err != nil {
 		return nil, err
 	}
+	unread, err := s.unreadCount(ctx, g)
+	if err != nil {
+		return nil, err
+	}
+	partner, deps, wds, err := s.alertSummary(ctx, g)
+	if err != nil {
+		return nil, err
+	}
 	return map[string]any{
 		"status": 1,
 		"time":   s.now().Unix(),
@@ -177,10 +193,10 @@ func (s *Server) getGroupDashboardData(ctx context.Context, c *call, g *member) 
 			"cash_balances":          cash,
 			"account_balances":       accounts,
 		},
-		"notification_count":             0,
-		"has_partner_bank":               0,
-		"unreconciled_deposits_count":    0,
-		"unreconciled_withdrawals_count": 0,
+		"notification_count":             unread,
+		"has_partner_bank":               partner,
+		"unreconciled_deposits_count":    deps,
+		"unreconciled_withdrawals_count": wds,
 	}, nil
 }
 

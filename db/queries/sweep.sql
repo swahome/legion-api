@@ -180,7 +180,7 @@ ORDER BY withdrawal_date DESC, id DESC;
 SELECT d.id, d.account_id, d.amount::text AS amount, d.description, d.deposit_date,
        coalesce(a.name, '')::text AS asset_name, coalesce(st.name, '')::text AS stock_name,
        coalesce(ss.shares, 0)::text AS shares_sold, coalesce(ss.price_per_share, 0)::text AS price_per_share,
-       coalesce(mm.institution, '')::text AS institution, coalesce(mm.amount, 0)::text AS invested
+       coalesce(mm.institution, '')::text AS institution, coalesce(mm.amount, 0)::text AS invested, mm.investment_date AS invested_on
 FROM deposits d
 LEFT JOIN assets a ON a.id = d.asset_id
 LEFT JOIN stocks st ON st.id = d.stock_id
