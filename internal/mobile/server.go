@@ -7,9 +7,11 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"net/netip"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +22,7 @@ import (
 
 	"github.com/swahome/legion-api/internal/account"
 	"github.com/swahome/legion-api/internal/auth"
+	"github.com/swahome/legion-api/internal/mail"
 	"github.com/swahome/legion-api/internal/payments"
 	"github.com/swahome/legion-api/internal/store"
 )
@@ -46,14 +49,28 @@ type Server struct {
 	acct    *account.Service
 	smsKick func()
 	pay     *payments.Service
-	now     func() time.Time
-	actions map[string]action
+	uploads string // folder for photos and statements (LEGION_UPLOADS_DIR)
+	// Statement files: their public address, email, and the worker's wake-up.
+	publicUploads string
+	mailer        mail.Sender
+	log           *slog.Logger
+	statementKick chan struct{}
+	banks         BankLinker
+	now           func() time.Time
+	actions       map[string]action
 }
 
 // WithAccounts sets the sign-up settings and the hook that wakes the SMS
 // dispatcher after a commit that queued a message.
 func (s *Server) WithAccounts(acct *account.Service, kick func()) *Server {
 	s.acct, s.smsKick = acct, kick
+	return s
+}
+
+// WithUploads sets the folder photos and statement files are written to.
+// It is also served at uploads/ beside mobile/.
+func (s *Server) WithUploads(dir string) *Server {
+	s.uploads = dir
 	return s
 }
 
@@ -69,7 +86,8 @@ type call struct {
 	userID  int64 // from the access token; 0 on public actions
 	r       *http.Request
 	version int
-	debtors bool // a debtor_loan_types action: the same handlers, on the types offered to debtors
+	debtors bool                               // a debtor_loan_types action: the same handlers, on the types offered to debtors
+	files   map[string][]*multipart.FileHeader // a photo upload's files
 }
 
 func New(pool *pgxpool.Pool, keys *Keys, authSvc *auth.Service, otp OTPSender) *Server {
@@ -77,7 +95,7 @@ func New(pool *pgxpool.Pool, keys *Keys, authSvc *auth.Service, otp OTPSender) *
 		otp = noOTPSender{}
 	}
 	s := &Server{pool: pool, q: store.New(pool), keys: keys, auth: authSvc, otp: otp, now: time.Now,
-		acct: &account.Service{}, smsKick: func() {}}
+		acct: &account.Service{}, smsKick: func() {}, statementKick: make(chan struct{}, 1)}
 	s.actions = map[string]action{
 		"login":                 {public: true, fn: s.login},
 		"generate_pin":          {public: true, fn: s.generatePin},
@@ -269,6 +287,7 @@ func New(pool *pgxpool.Pool, keys *Keys, authSvc *auth.Service, otp OTPSender) *
 		s.actions[module+"/unhide"] = action{fn: s.groupAction(6, s.hideCategory(kind, false))}
 		s.actions[module+"/delete"] = action{fn: s.groupAction(6, s.deleteCategory(kind))}
 	}
+	s.addSweepActions()
 	return s
 }
 
@@ -278,6 +297,15 @@ func (s *Server) Routes() http.Handler {
 	r := chi.NewRouter()
 	r.Post("/mobile/{action}", s.serve)
 	r.Post("/mobile/{module}/{action}", s.serve)
+	// Photos (uploads/groups/<file>) and statement files, as the legacy
+	// site served them. No directory listings.
+	r.Get("/uploads/*", func(w http.ResponseWriter, r *http.Request) {
+		if s.uploads == "" {
+			http.NotFound(w, r)
+			return
+		}
+		http.StripPrefix("/uploads/", http.FileServer(noListing{http.Dir(s.uploads)})).ServeHTTP(w, r)
+	})
 	return r
 }
 
@@ -322,6 +350,32 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		// Sent unencrypted, as before: an old build may not read the new scheme.
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"status": 0, "message": "You are using an outdated application. Update to the latest application"})
+		return
+	}
+	if known && uploadActions[name] && strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		// A photo upload: a plain multipart form, not an encrypted body.
+		r.Body = http.MaxBytesReader(w, r.Body, maxPhotoBytes+1<<20)
+		if err := r.ParseMultipartForm(maxPhotoBytes); err != nil {
+			out.send(http.StatusOK, map[string]any{"status": 2, "error": "No files sent"})
+			return
+		}
+		c.req = request{}
+		for k, v := range r.Form {
+			if len(v) > 0 {
+				c.req[k] = v[0]
+			}
+		}
+		c.files = r.MultipartForm.File
+		if c.userID != 0 && c.req.Int("user_id") != c.userID {
+			out.send(http.StatusOK, status(400, "user Authentication token is invalid."))
+			return
+		}
+		resp, err := act.fn(r.Context(), c)
+		if err != nil {
+			out.internal(r, err)
+			return
+		}
+		out.send(http.StatusOK, resp)
 		return
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes))
@@ -375,6 +429,21 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out.send(http.StatusOK, resp)
+}
+
+// noListing serves files but not directory listings.
+type noListing struct{ fs http.FileSystem }
+
+func (n noListing) Open(name string) (http.File, error) {
+	f, err := n.fs.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	if st, err := f.Stat(); err == nil && st.IsDir() {
+		f.Close()
+		return nil, os.ErrNotExist
+	}
+	return f, nil
 }
 
 type responder struct {

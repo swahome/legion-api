@@ -71,6 +71,16 @@ type Config struct {
 	USSDIPs     []string
 	TwilioToken string
 	Brand       string
+
+	// Mobile app files and email (milestone 8). UploadsDir holds photos and
+	// statement files, served at /v1/legacy/uploads/. SMTP sends emailed
+	// statements; without SMTPHost they are not sent.
+	UploadsDir   string
+	SMTPHost     string
+	SMTPPort     int
+	SMTPUser     string
+	SMTPPassword string
+	SMTPFrom     string
 }
 
 func list(key string) []string {
@@ -131,6 +141,11 @@ func Load() (Config, error) {
 		USSDIPs:            list("LEGION_USSD_IPS"),
 		TwilioToken:        os.Getenv("LEGION_TWILIO_AUTH_TOKEN"),
 		Brand:              getenv("LEGION_BRAND", "Legion"),
+		UploadsDir:         getenv("LEGION_UPLOADS_DIR", "uploads"),
+		SMTPHost:           os.Getenv("LEGION_SMTP_HOST"),
+		SMTPUser:           os.Getenv("LEGION_SMTP_USER"),
+		SMTPPassword:       os.Getenv("LEGION_SMTP_PASSWORD"),
+		SMTPFrom:           os.Getenv("LEGION_SMTP_FROM"),
 	}
 	var err error
 	if c.AccessTTL, err = time.ParseDuration(getenv("LEGION_ACCESS_TTL", "15m")); err != nil {
@@ -144,6 +159,12 @@ func Load() (Config, error) {
 	}
 	if c.MigrateOnStart, err = strconv.ParseBool(getenv("LEGION_MIGRATE_ON_START", "false")); err != nil {
 		return c, fmt.Errorf("LEGION_MIGRATE_ON_START: %w", err)
+	}
+	if c.SMTPPort, err = strconv.Atoi(getenv("LEGION_SMTP_PORT", "587")); err != nil {
+		return c, fmt.Errorf("LEGION_SMTP_PORT: %w", err)
+	}
+	if c.SMTPHost != "" && c.SMTPFrom == "" {
+		return c, errors.New("LEGION_SMTP_FROM is needed with LEGION_SMTP_HOST")
 	}
 	if c.Location, err = time.LoadLocation(getenv("LEGION_TIMEZONE", "Africa/Nairobi")); err != nil {
 		return c, fmt.Errorf("LEGION_TIMEZONE: %w", err)

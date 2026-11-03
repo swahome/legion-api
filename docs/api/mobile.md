@@ -28,6 +28,14 @@ With neither set, `/v1/legacy` isn't served. Setting only one is an error.
 `mobile.crt` expired in 2021; that doesn't matter, because only its public key is
 used, as before.
 
+Photos and statement files are written under `LEGION_UPLOADS_DIR` (default
+`uploads`, beside the binary) and served at `/v1/legacy/uploads/`, as the old
+site served `uploads/`. Keep the folder outside the release folder. Statement
+download links start with `LEGION_PUBLIC_URL`. Emailed statements need
+`LEGION_SMTP_HOST`, `LEGION_SMTP_PORT` (587, or 465 for TLS from the start),
+`LEGION_SMTP_USER`, `LEGION_SMTP_PASSWORD` and `LEGION_SMTP_FROM`; without a
+host they fail after three tries and say so in the log.
+
 ## What carries over
 
 - **Encryption, both ways.** A request body is `base64(AES-128-CBC(json)):base64(iv)`, and its key travels RSA-wrapped in the `Secret` header. A reply is `{"secret", "body"}`, sealed for `mobile.crt`. This was checked against the real keys using the legacy PHP `Encryptdecrypt` code: it reads what Legion sends, and Legion reads what it sends.
@@ -116,6 +124,24 @@ used, as before.
 | `mobile/setup_tasks/resend_group_invitation`, `members/send_invitation`, `setup_tasks/cancel_group_invitation`, `setup_tasks/reassign_member_group_role`, `members/reassign_member_group_role` | Officials only. Resend or cancel a member's invite; move a role to another member while the group is in setup |
 | `mobile/complete_group_setup` | Officials only. Optional `referral_code`. Makes the group live and texts the members added during setup |
 | `mobile/setup_tasks/index` | An empty task list. The old setup task tracker isn't carried over; the web's setup page replaces it |
+| `mobile/asset_categories/*`, `mobile/assets/*` | Categories (any member, as before, but writes are officials only), assets, purchase payments (need a `request_id`), sale and void. Voiding an asset voids its payments and sale |
+| `mobile/stocks/*` | Officials record a purchase (`request_id`), update the price, sell (no more than the shares left) and void. A void takes the purchase and sales with it |
+| `mobile/money_market_investments/*` | Create, top up, cash in and void. A cashed-in investment is closed and takes no more top ups |
+| `mobile/deposits/record_contribution_transfer`, `void_contribution_transfer`, `get_group_contribution_transfers` | Transfers between contributions, to fines, to loans and to another member, with the legacy checks and messages. The amount can't be more than what was paid in (or repaid on the loan) |
+| `mobile/meetings/create_group_meeting`, `get_group_meetings` | A meeting with attendance, agenda, AOB and the money collected. Each contribution, fine and loan is recorded as it would be on its own; a bad entry is skipped and counted in `skipped_entries`, the rest are kept. The old sync dropped the "late" list; it is kept now. Every member gets a meeting summary notification |
+| `mobile/notifications/*`, `get_group_member_notifications_summary` | The member's notifications, unread count, and marking them read. Push notifications are not sent (the old FCM API is shut down); the app's token is stored by `users/update_user_mobile_token` for when they are. `send_push_notifications` and `notifications/create_test` answer that push is not available |
+| `mobile/users/*`, `change_user_password`, `validate_user`, `check_user_validation_status`, `save_activity_log`, `get_user_group_data_information` | Name, email, phone (confirmed with a texted code), photos (multipart or base64, images only, up to 8 MB), password. `get_user_group_data_information` always answers one page |
+| `mobile/groups/*`, `mobile/group_roles/*`, `mobile/members/*`, `mobile/contributions/hide`, `unhide`, `delete`, `get_group_contributions_to_pay` | Officials only for changes. `members/delete_member` answers "This action has been disabled", as before. A contribution with money on it can't be deleted |
+| `mobile/get_member_dashboard`, `get_group_more_dashboard_data`, `get_group_bank_balances`, `get_group_member_fines_summary` | The same figures as the other dashboards. The old server sent zeros to builds after 57 in `get_member_dashboard`; these send the real figures |
+| `mobile/get_member_and_group_chart_data`, `get_ios_member_and_group_chart_data` | The last twelve months of money in and out of the group's accounts, and the member's own deposits, by month (`Jan`, `Feb`...). Expenses are all-time totals per category |
+| `mobile/reports/account_balances` | Open accounts by category, with totals |
+| `mobile/statements/fine_statement`, `total_group_savings` | The last three months of fines, in the contribution statement's shape; the group's contributions paid |
+| `mobile/statements/download_statement`, `send_email_statement` | Queue a PDF statement (`type` 1 contribution, 2 fine, 3 loan with `loan_id`; `from` and `to`, default the last three months). A worker in the binary writes it: a download leaves a "File Type Ready" notification (category 16) with the link and size; an email goes to `email` or the profile's address. A member without an email gets the one they typed on their profile, unless someone else has it. File names carry a random part, since the uploads folder is served without a login |
+| `mobile/billing/*` | Every group is on the free plan for now. Officials see the imported invoices and receipts; amounts payable are empty, and paying answers "Your group is on the free plan. No payment is needed." |
+| `mobile/bank_accounts/connect`, `verify`, `disconnect` | Officials only. Linking an account to its partner bank's alerts with a code the bank texts to the signatory. The banks' linking APIs aren't connected yet, so `connect` and `verify` answer "Service is temporarily down", except in test mode (`LEGION_CHAMASOFT_FAKE`), where any code works. `disconnect` works |
+| `mobile/bank_accounts/activate_wallet` | Checks `accept_terms_and_conditions`, then answers "Service is temporarily down": opening a Chamasoft e-wallet isn't available to Legion |
+| `mobile/deposits/calculate_convenience_charge` | Asks Chamasoft what MPesa charges on `amount` into the group's payment account (free in test mode) |
+| `mobile/deposits/make_group_payment_old_old`, `make_new_group_payment_copy`, `make_new_group_payment_old`, `make_payment_to_group_bank_express_old` | The same as `make_new_group_payment` |
 
 **Recording.** Every action that changes the books is for officials only (a group role or admin), with the legacy "For group admins only" answer. The old category and depositor actions let any member make changes; now only officials can. Payments go through the same code as the web, so a recorded deposit, its cash book entry and the member's ledger entry are written and voided together. Dates may be a unix time (seconds or milliseconds) or a date string read as PHP's `strtotime` read it (`05-10-2026` is 5 October, `10/05/2026` is 5 October too, month first). Amounts may carry commas. The app's payment method numbers map to Legion's methods; unknown numbers record no method. Validation failures answer "Form validation failed" with `validation_errors` on the field concerned. SMS and email receipts aren't sent yet.
 
@@ -132,9 +158,14 @@ Group actions check the user (status 4), the group (status 5) and the caller's m
 
 **Loans.** The rules are the web's: a balance is the live installments and fines less the live repayments, and an application goes from its guarantors to the signatories (members with a group role, or only officials when the group restricts approvals to admins), then an official pays it out on the web. A loan paid out from the app is recorded with `loans/record_member_loan`. Amounts in loan rows come with two decimals (`4000.00`). `toggle_loan_application_status` was an internal helper in the old code and isn't served. Bank loans (money the group borrows) and debtors came in milestone 4b; the app had no actions for lending to debtors beyond the list and loan types.
 
-**Not there yet.** Until later milestones port notifications and bank alerts, these come back as 0 or empty in the shapes the app expects: notification and unreconciled counts. Deposits are all "Manually recorded" until bank reconciliation arrives. Groups that disable arrears got a deposits-only statement in the old app; for now they get the regular contribution statement.
+**Groups that disable arrears** got a deposits-only statement in the old app; they get the regular contribution statement.
 
-The other actions answer HTTP 404 until their milestone ports them. The old `*_categories/manage` actions, which read the request body directly and trusted the user id in it, are not carried over; the app uses `create`, `edit`, `hide`, `unhide` and `delete`. The same goes for `recipients/create`.
+**Old actions not served.** These answer HTTP 404:
+
+- The old `*_categories/manage` actions, which read the request body directly and trusted the user id in it; the app uses `create`, `edit`, `hide`, `unhide` and `delete`. The same goes for `recipients/create`, `expense_categories/manage`, `income_categories/manage` and `income_categories/index`.
+- The root-level actions from before the app moved to modules: `manage_group_account`, `manage_group_contributions`, `manage_group_loan_type`, `manage_asset_categories`, `update_group_loan_setting`, `generate_member_statement`, `change_email_address`, `change_phone_number`, `delete_group_member` and `register_member`. Their module versions are served (`bank_accounts/*`, `setup_tasks/*`, `loan_types/*`, `asset_categories/*`, `statements/*`, `users/*`, `members/*`). The sign-up ones are covered in `docs/api/auth.md`.
+- Form checks the old code exposed by accident: `check_contribution_member_list`, `check_if_date_is_out_of_range`, `check_if_second_date_is_out_of_range`, `check_if_invoice_date_is_less_than_contribution_date`, `check_template_placeholders`, `bank_accounts/check_email_selected_members` and `check_sms_selected_members`.
+- The bank-side helpers `bank_accounts/create_otp`, `verify_otp`, `verify_account` and `disconnect_account`, which had no user checks.
 
 ## Deliberately not carried over
 

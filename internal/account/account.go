@@ -75,6 +75,7 @@ type Purpose = store.UserCodePurpose
 const (
 	VerifyPhone   = store.UserCodePurposeVerifyPhone
 	ResetPassword = store.UserCodePurposeResetPassword
+	ChangePhone   = store.UserCodePurposeChangePhone
 )
 
 // SendCode makes a new code for the user, replacing any earlier one, and
@@ -83,6 +84,11 @@ func (s *Service) SendCode(ctx context.Context, q *store.Queries, u store.User, 
 	if u.Phone == nil {
 		return ErrNoPhone
 	}
+	return s.SendCodeTo(ctx, q, u, purpose, digits, *u.Phone)
+}
+
+// SendCodeTo is SendCode to another number: a phone the user is moving to.
+func (s *Service) SendCodeTo(ctx context.Context, q *store.Queries, u store.User, purpose Purpose, digits int, phone string) error {
 	kind := string(purpose)
 	n, err := q.CountRecentSMS(ctx, store.CountRecentSMSParams{UserID: &u.ID, Kind: kind, Since: s.now().Add(-time.Hour)})
 	if err != nil {
@@ -102,10 +108,12 @@ func (s *Service) SendCode(ctx context.Context, q *store.Queries, u store.User, 
 	switch purpose {
 	case VerifyPhone:
 		body = fmt.Sprintf("Dear %s, kindly use %s as the activation code. %s. DO NOT share this code", greet(u), code, app)
+	case ChangePhone:
+		body = fmt.Sprintf("Dear %s, use %s to confirm this as your new %s phone number. DO NOT share this code", greet(u), code, app)
 	default:
 		body = fmt.Sprintf("Dear %s, your password recovery code is %s - %s. Thank you. DO NOT share this code", greet(u), code, app)
 	}
-	_, err = sms.Queue(ctx, q, sms.Message{To: *u.Phone, Body: body, Kind: kind, UserID: &u.ID})
+	_, err = sms.Queue(ctx, q, sms.Message{To: phone, Body: body, Kind: kind, UserID: &u.ID})
 	return err
 }
 

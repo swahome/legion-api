@@ -583,7 +583,7 @@ func (q *Queries) FineCategoryInGroup(ctx context.Context, arg FineCategoryInGro
 }
 
 const getDeposit = `-- name: GetDeposit :one
-SELECT id, legacy_id, legacy_type, group_id, account_id, account_kind, kind, method, membership_id, contribution_id, fine_category_id, income_category_id, depositor_id, amount, deposit_date, description, is_backdated, refs, created_by, created_at, voided_at, voided_by, loan_id, bank_loan_id, transaction_alert_id FROM deposits WHERE group_id = $1 AND id = $2
+SELECT id, legacy_id, legacy_type, group_id, account_id, account_kind, kind, method, membership_id, contribution_id, fine_category_id, income_category_id, depositor_id, amount, deposit_date, description, is_backdated, refs, created_by, created_at, voided_at, voided_by, loan_id, bank_loan_id, transaction_alert_id, asset_id, stock_id, stock_sale_id, money_market_investment_id, meeting_id FROM deposits WHERE group_id = $1 AND id = $2
 `
 
 type GetDepositParams struct {
@@ -620,6 +620,11 @@ func (q *Queries) GetDeposit(ctx context.Context, arg GetDepositParams) (Deposit
 		&i.LoanID,
 		&i.BankLoanID,
 		&i.TransactionAlertID,
+		&i.AssetID,
+		&i.StockID,
+		&i.StockSaleID,
+		&i.MoneyMarketInvestmentID,
+		&i.MeetingID,
 	)
 	return i, err
 }
