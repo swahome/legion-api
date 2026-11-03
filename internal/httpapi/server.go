@@ -74,6 +74,7 @@ func (s *Server) Routes() http.Handler {
 		}
 		r.Route("/hooks", s.hookRoutes)
 		r.Route("/auth", func(r chi.Router) {
+			r.Get("/options", s.loginOptions)
 			r.Post("/login", s.login)
 			r.Post("/refresh", s.refresh)
 			r.Post("/logout", s.logout)
@@ -109,8 +110,12 @@ func (s *Server) Routes() http.Handler {
 				r.Get("/stats", s.adminStats)
 				r.Get("/audit", s.adminAudit)
 				r.Get("/groups", s.adminListGroups)
+				r.Get("/groups/export", s.adminExportGroups)
+				r.Get("/groups/{groupID}", s.adminGetGroup)
 				r.Patch("/groups/{groupID}", s.adminUpdateGroup)
 				r.Get("/users", s.adminListUsers)
+				r.Get("/users/export", s.adminExportUsers)
+				r.Get("/roles", s.adminListRoles)
 				r.Post("/users", s.adminCreateUser)
 				r.Get("/users/{userID}", s.adminGetUser)
 				r.Patch("/users/{userID}", s.adminUpdateUser)

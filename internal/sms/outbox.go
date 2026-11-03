@@ -92,6 +92,8 @@ func (d *Dispatcher) SendDue(ctx context.Context) (int, error) {
 		var res Result
 		if disabled {
 			res = Result{Status: "Disabled", Err: ErrDisabled}
+		} else if m.GroupID != nil && d.groupOff(ctx, q, *m.GroupID) {
+			res = Result{Status: "GroupDisabled", Err: ErrGroupDisabled}
 		} else {
 			sendCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			res = d.sender.Send(sendCtx, m.ToPhone, m.Body)
@@ -116,6 +118,19 @@ func (d *Dispatcher) record(ctx context.Context, q *store.Queries, id int64, att
 	}
 	d.log.Warn("sms: failed", "id", id, "attempts", attempts, "err", msg)
 	return q.MarkSMSFailed(ctx, store.MarkSMSFailedParams{ID: id, ProviderStatus: status, Error: &msg})
+}
+
+// groupOff says whether a platform admin switched off a group's
+// notifications (the group setting disable_notifications).
+func (d *Dispatcher) groupOff(ctx context.Context, q *store.Queries, groupID int64) bool {
+	off, err := q.GroupNotificationsOff(ctx, groupID)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			d.log.Error("sms: read group notifications switch", "err", err, "group_id", groupID)
+		}
+		return false
+	}
+	return off
 }
 
 // disabled reads the legacy platform switch disable_smses.

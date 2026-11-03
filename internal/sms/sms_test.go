@@ -120,3 +120,36 @@ func TestDispatcherRetriesAndFails(t *testing.T) {
 		t.Fatal(s)
 	}
 }
+
+func TestDispatcherSkipsGroupsWithNotificationsOff(t *testing.T) {
+	pool := testdb.New(t)
+	ctx := context.Background()
+	q := store.New(pool)
+	var on, off int64
+	if err := pool.QueryRow(ctx, `INSERT INTO groups (name, slug) VALUES ('On', 'on') RETURNING id`).Scan(&on); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO groups (name, slug, settings) VALUES ('Off', 'off', '{"disable_notifications": "1"}') RETURNING id`).Scan(&off); err != nil {
+		t.Fatal(err)
+	}
+	for to, g := range map[string]int64{"+254700000011": on, "+254700000012": off} {
+		if _, err := Queue(ctx, q, Message{To: to, Body: "hi", Kind: "test", GroupID: &g}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f := fakeSender{results: map[string]Result{
+		"+254700000011": {MessageID: "m1", Status: "Success"},
+		"+254700000012": {MessageID: "m2", Status: "Success"},
+	}}
+	d := NewDispatcher(pool, f, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if _, err := d.SendDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for to, want := range map[string]string{"+254700000011": "sent", "+254700000012": "failed"} {
+		var s string
+		_ = pool.QueryRow(ctx, `SELECT status FROM sms_messages WHERE to_phone = $1`, to).Scan(&s)
+		if s != want {
+			t.Fatalf("%s: %s, want %s", to, s, want)
+		}
+	}
+}

@@ -143,3 +143,7 @@ func (l LogSender) Send(ctx context.Context, to, body string) Result {
 
 // ErrDisabled marks messages dropped because SMS is switched off.
 var ErrDisabled = errors.New("SMS is switched off in the platform settings")
+
+// ErrGroupDisabled marks messages dropped because a platform admin switched
+// off the group's notifications.
+var ErrGroupDisabled = errors.New("notifications are switched off for this group")

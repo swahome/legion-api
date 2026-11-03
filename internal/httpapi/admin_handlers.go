@@ -93,9 +93,17 @@ func (s *Server) adminStats(w http.ResponseWriter, r *http.Request) {
 		writeInternal(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]int64{
-		"groups": st.Groups, "active_groups": st.ActiveGroups, "users": st.Users,
-		"users_active_30d": st.UsersActive30d, "memberships": st.Memberships,
+	writeJSON(w, http.StatusOK, map[string]any{
+		"groups": st.Groups, "active_groups": st.ActiveGroups, "setup_groups": st.SetupGroups,
+		"suspended_groups": st.SuspendedGroups, "closed_groups": st.ClosedGroups, "groups_today": st.GroupsToday,
+		"users": st.Users, "users_today": st.UsersToday, "users_active_30d": st.UsersActive30d,
+		"memberships": st.Memberships,
+		"sms_total":   st.SmsTotal, "sms_sent_today": st.SmsSentToday, "sms_queued": st.SmsQueued, "sms_failed_7d": st.SmsFailed7d,
+		"transaction_alerts": st.TransactionAlerts, "alerts_unassigned": st.AlertsUnassigned,
+		"accounts_connected": st.AccountsConnected,
+		"payments_paid":      st.PaymentsPaid, "payments_paid_amount": st.PaymentsPaidAmount,
+		"invoices_today": st.InvoicesToday, "fine_invoices_today": st.FineInvoicesToday,
+		"open_withdrawal_requests": st.OpenWithdrawalRequests, "audit_entries": st.AuditEntries,
 	})
 }
 
@@ -133,28 +141,72 @@ func deref(p *string) string {
 // ---- groups ----
 
 type adminGroup struct {
-	ID            int64     `json:"id"`
-	LegacyID      *int32    `json:"legacy_id"`
-	Name          string    `json:"name"`
-	Slug          string    `json:"slug"`
-	Status        string    `json:"status"`
-	Currency      string    `json:"currency"`
-	CountryCode   string    `json:"country_code"`
-	ActiveMembers int64     `json:"active_members"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID                int64      `json:"id"`
+	LegacyID          *int32     `json:"legacy_id"`
+	Name              string     `json:"name"`
+	Slug              string     `json:"slug"`
+	Status            string     `json:"status"`
+	Currency          string     `json:"currency"`
+	CountryCode       string     `json:"country_code"`
+	Email             *string    `json:"email"`
+	Phone             *string    `json:"phone"`
+	ActiveMembers     int64      `json:"active_members"`
+	RegisteredMembers int64      `json:"registered_members"`
+	LastSeenAt        *time.Time `json:"last_seen_at"`
+	Contact           *contact   `json:"contact"`
+	CreatedAt         time.Time  `json:"created_at"`
 }
 
-func (s *Server) adminListGroups(w http.ResponseWriter, r *http.Request) {
-	p := pageParams(r)
-	params := store.AdminListGroupsParams{Search: queryPtr(r, "q"), PageSize: p.size, PageOffset: p.offset}
+// contact is the person to call about a group: its owner, else whoever
+// created it.
+type contact struct {
+	UserID int64   `json:"user_id"`
+	Name   string  `json:"name"`
+	Phone  *string `json:"phone"`
+	Email  *string `json:"email"`
+}
+
+func newContact(id int64, name string, phone, email *string) *contact {
+	if id == 0 {
+		return nil
+	}
+	return &contact{id, strings.TrimSpace(name), phone, email}
+}
+
+// adminGroupsParams reads the filters shared by the group list and its export.
+func adminGroupsParams(w http.ResponseWriter, r *http.Request) (store.AdminListGroupsParams, bool) {
+	params := store.AdminListGroupsParams{Search: queryPtr(r, "q"), View: r.URL.Query().Get("view"), Sort: r.URL.Query().Get("sort")}
 	if v := queryPtr(r, "status"); v != nil {
 		st := store.GroupStatus(*v)
 		if !st.Valid() {
 			writeError(w, http.StatusBadRequest, "invalid_status", "Unknown group status.")
-			return
+			return params, false
 		}
 		params.Status = store.NullGroupStatus{GroupStatus: st, Valid: true}
 	}
+	if params.View != "" && params.View != "inactive" {
+		writeError(w, http.StatusBadRequest, "invalid_view", "View must be inactive or left out.")
+		return params, false
+	}
+	return params, true
+}
+
+func toAdminGroup(g store.AdminListGroupsRow) adminGroup {
+	return adminGroup{ID: g.ID, LegacyID: g.LegacyID, Name: g.Name, Slug: g.Slug, Status: string(g.Status),
+		Currency: g.Currency, CountryCode: g.CountryCode, Email: g.GroupEmail, Phone: g.GroupPhone,
+		ActiveMembers: g.ActiveMembers, RegisteredMembers: g.RegisteredMembers, LastSeenAt: g.LastSeenAt,
+		Contact: newContact(g.ContactID, g.ContactName, g.ContactPhone, g.ContactEmail), CreatedAt: g.CreatedAt}
+}
+
+// adminListGroups lists groups. ?status, ?q (name, id or phone),
+// ?view=inactive (no sign-in for 90 days), ?sort=newest.
+func (s *Server) adminListGroups(w http.ResponseWriter, r *http.Request) {
+	params, ok := adminGroupsParams(w, r)
+	if !ok {
+		return
+	}
+	p := pageParams(r)
+	params.PageSize, params.PageOffset = p.size, p.offset
 	rows, err := s.q.AdminListGroups(r.Context(), params)
 	if err != nil {
 		writeInternal(w, r, err)
@@ -164,30 +216,21 @@ func (s *Server) adminListGroups(w http.ResponseWriter, r *http.Request) {
 	var total int64
 	for _, g := range rows {
 		total = g.Total
-		items = append(items, adminGroup{g.ID, g.LegacyID, g.Name, g.Slug, string(g.Status), g.Currency,
-			g.CountryCode, g.ActiveMembers, g.CreatedAt})
+		items = append(items, toAdminGroup(g))
 	}
 	writeJSON(w, http.StatusOK, newPaged(items, total, p))
 }
 
-func (s *Server) adminUpdateGroup(w http.ResponseWriter, r *http.Request) {
+// adminGetGroup is the admin's summary of one group. Its members,
+// contributions and accounts come from the group's own endpoints, which
+// platform admins can read.
+func (s *Server) adminGetGroup(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(r, "groupID")
 	if !ok {
 		writeError(w, http.StatusNotFound, "group_not_found", "Group not found.")
 		return
 	}
-	var req struct {
-		Status string `json:"status"`
-	}
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-	st := store.GroupStatus(req.Status)
-	if !st.Valid() {
-		writeError(w, http.StatusBadRequest, "invalid_status", "Status must be setup, active, suspended or closed.")
-		return
-	}
-	g, err := s.q.SetGroupStatus(r.Context(), store.SetGroupStatusParams{ID: id, Status: st})
+	g, err := s.q.AdminGetGroup(r.Context(), id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "group_not_found", "Group not found.")
 		return
@@ -196,36 +239,140 @@ func (s *Server) adminUpdateGroup(w http.ResponseWriter, r *http.Request) {
 		writeInternal(w, r, err)
 		return
 	}
-	s.audit(r, "group.status", "group", id, map[string]string{"status": req.Status})
-	writeJSON(w, http.StatusOK, map[string]any{"id": g.ID, "name": g.Name, "status": g.Status})
+	var settings map[string]any
+	_ = json.Unmarshal(g.Settings, &settings)
+	off := false
+	if v, ok := settings["disable_notifications"]; ok {
+		off = v == "1" || v == true || v == "true"
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id": g.ID, "legacy_id": g.LegacyID, "name": g.Name, "slug": g.Slug, "status": g.Status,
+		"currency": g.Currency, "country_code": g.CountryCode, "timezone": g.Timezone,
+		"email": g.Email, "phone": g.Phone, "address": g.Address,
+		"created_at": g.CreatedAt, "updated_at": g.UpdatedAt, "created_by_name": g.CreatedByName,
+		"contact":        newContact(g.ContactID, g.ContactName, g.ContactPhone, g.ContactEmail),
+		"active_members": g.ActiveMembers, "registered_members": g.RegisteredMembers, "last_seen_at": g.LastSeenAt,
+		"contributions": g.Contributions, "accounts": g.Accounts, "loans": g.Loans,
+		"notifications_off": off,
+	})
+}
+
+// adminUpdateGroup changes a group's status, name, contact details or
+// its notifications switch. Fields left out stay as they are.
+func (s *Server) adminUpdateGroup(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r, "groupID")
+	if !ok {
+		writeError(w, http.StatusNotFound, "group_not_found", "Group not found.")
+		return
+	}
+	var req struct {
+		Status           *string          `json:"status"`
+		Name             *string          `json:"name"`
+		Email            Optional[string] `json:"email"`
+		Phone            Optional[string] `json:"phone"`
+		NotificationsOff *bool            `json:"notifications_off"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if req.Status != nil && !store.GroupStatus(*req.Status).Valid() {
+		writeError(w, http.StatusBadRequest, "invalid_status", "Status must be setup, active, suspended or closed.")
+		return
+	}
+	if req.Name != nil {
+		n := strings.TrimSpace(*req.Name)
+		if n == "" {
+			writeError(w, http.StatusBadRequest, "invalid_name", "The group needs a name.")
+			return
+		}
+		req.Name = &n
+	}
+	email, phone := trimOpt(req.Email.Value), trimOpt(req.Phone.Value)
+	if phone != nil {
+		p, err := auth.NormalizePhone(*phone, s.defaultCallingCode)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_phone", "That phone number doesn't look right.")
+			return
+		}
+		phone = &p
+	}
+	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
+		q := s.q.WithTx(tx)
+		if req.Status != nil {
+			if _, err := q.SetGroupStatus(r.Context(), store.SetGroupStatusParams{ID: id, Status: store.GroupStatus(*req.Status)}); err != nil {
+				return err
+			}
+		}
+		if req.Name != nil || req.Email.Set || req.Phone.Set || req.NotificationsOff != nil {
+			_, err := q.AdminUpdateGroupProfile(r.Context(), store.AdminUpdateGroupProfileParams{
+				ID: id, Name: req.Name, SetEmail: req.Email.Set, Email: email, SetPhone: req.Phone.Set, Phone: phone,
+				NotificationsOff: req.NotificationsOff,
+			})
+			return err
+		}
+		return nil
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "group_not_found", "Group not found.")
+		return
+	}
+	if err != nil {
+		writeInternal(w, r, err)
+		return
+	}
+	if req.Status != nil {
+		s.audit(r, "group.status", "group", id, map[string]string{"status": *req.Status})
+	}
+	if req.Name != nil || req.Email.Set || req.Phone.Set || req.NotificationsOff != nil {
+		s.audit(r, "group.update", "group", id, map[string]any{"name": req.Name, "email": email, "phone": phone, "notifications_off": req.NotificationsOff})
+	}
+	s.adminGetGroup(w, r)
+}
+
+func trimOpt(p *string) *string {
+	if p == nil {
+		return nil
+	}
+	v := strings.TrimSpace(*p)
+	if v == "" {
+		return nil
+	}
+	return &v
 }
 
 // ---- users ----
 
 type adminUser struct {
-	ID            int64      `json:"id"`
-	FirstName     string     `json:"first_name"`
-	MiddleName    string     `json:"middle_name"`
-	LastName      string     `json:"last_name"`
-	Phone         *string    `json:"phone"`
-	Email         *string    `json:"email"`
-	IDNumber      *string    `json:"id_number,omitempty"`
-	IsActive      bool       `json:"is_active"`
-	LastLoginAt   *time.Time `json:"last_login_at"`
-	CreatedAt     time.Time  `json:"created_at"`
-	PlatformRoles []string   `json:"platform_roles"`
-	Groups        *int64     `json:"groups,omitempty"`
-	Memberships   []any      `json:"memberships,omitempty"`
+	ID            int64          `json:"id"`
+	FirstName     string         `json:"first_name"`
+	MiddleName    string         `json:"middle_name"`
+	LastName      string         `json:"last_name"`
+	Phone         *string        `json:"phone"`
+	Email         *string        `json:"email"`
+	IDNumber      *string        `json:"id_number,omitempty"`
+	IsActive      bool           `json:"is_active"`
+	LastLoginAt   *time.Time     `json:"last_login_at"`
+	CreatedAt     time.Time      `json:"created_at"`
+	PlatformRoles []string       `json:"platform_roles"`
+	Groups        *int64         `json:"groups,omitempty"`
+	GroupList     []userGroupRef `json:"group_list,omitempty"`
+	Memberships   []any          `json:"memberships,omitempty"`
 }
 
-func (s *Server) adminListUsers(w http.ResponseWriter, r *http.Request) {
-	p := pageParams(r)
-	params := store.AdminListUsersParams{Search: queryPtr(r, "q"), PageSize: p.size, PageOffset: p.offset}
+type userGroupRef struct {
+	GroupID    int64  `json:"group_id"`
+	GroupName  string `json:"group_name"`
+	IsOfficial bool   `json:"is_official"`
+}
+
+// adminUsersParams reads the filters shared by the user list and its export.
+func adminUsersParams(w http.ResponseWriter, r *http.Request) (store.AdminListUsersParams, bool) {
+	params := store.AdminListUsersParams{Search: queryPtr(r, "q")}
 	if v := queryPtr(r, "role"); v != nil {
 		role := store.PlatformRole(*v)
 		if !role.Valid() {
 			writeError(w, http.StatusBadRequest, "invalid_role", "Unknown platform role.")
-			return
+			return params, false
 		}
 		params.Role = store.NullPlatformRole{PlatformRole: role, Valid: true}
 	}
@@ -233,19 +380,54 @@ func (s *Server) adminListUsers(w http.ResponseWriter, r *http.Request) {
 		b := *v == "true"
 		params.IsActive = &b
 	}
-	rows, err := s.q.AdminListUsers(r.Context(), params)
+	return params, true
+}
+
+// usersWithGroups lists users with the groups each one is in.
+func (s *Server) usersWithGroups(ctx context.Context, params store.AdminListUsersParams) ([]adminUser, int64, error) {
+	rows, err := s.q.AdminListUsers(ctx, params)
 	if err != nil {
-		writeInternal(w, r, err)
-		return
+		return nil, 0, err
+	}
+	ids := make([]int64, 0, len(rows))
+	for _, u := range rows {
+		ids = append(ids, u.ID)
+	}
+	gs, err := s.q.AdminUsersGroupNames(ctx, ids)
+	if err != nil {
+		return nil, 0, err
+	}
+	byUser := map[int64][]userGroupRef{}
+	for _, g := range gs {
+		byUser[g.UserID] = append(byUser[g.UserID], userGroupRef{g.GroupID, g.GroupName, g.IsOfficial})
 	}
 	items := make([]adminUser, 0, len(rows))
 	var total int64
 	for _, u := range rows {
 		total = u.Total
 		n := u.Groups
+		list := byUser[u.ID]
+		if list == nil {
+			list = []userGroupRef{}
+		}
 		items = append(items, adminUser{ID: u.ID, FirstName: u.FirstName, MiddleName: u.MiddleName,
 			LastName: u.LastName, Phone: u.Phone, Email: u.Email, IsActive: u.IsActive,
-			LastLoginAt: u.LastLoginAt, CreatedAt: u.CreatedAt, PlatformRoles: u.PlatformRoles, Groups: &n})
+			LastLoginAt: u.LastLoginAt, CreatedAt: u.CreatedAt, PlatformRoles: u.PlatformRoles, Groups: &n, GroupList: list})
+	}
+	return items, total, nil
+}
+
+func (s *Server) adminListUsers(w http.ResponseWriter, r *http.Request) {
+	p := pageParams(r)
+	params, ok := adminUsersParams(w, r)
+	if !ok {
+		return
+	}
+	params.PageSize, params.PageOffset = p.size, p.offset
+	items, total, err := s.usersWithGroups(r.Context(), params)
+	if err != nil {
+		writeInternal(w, r, err)
+		return
 	}
 	writeJSON(w, http.StatusOK, newPaged(items, total, p))
 }

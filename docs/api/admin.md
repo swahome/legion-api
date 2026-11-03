@@ -14,7 +14,7 @@ Paged lists take `page` (from 1) and `page_size` (1 to 200, default 50) and retu
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/admin/stats` | Counts: `groups`, `active_groups`, `users`, `users_active_30d`, `memberships` |
+| GET | `/admin/stats` | Dashboard counts. Groups: `groups`, `active_groups`, `setup_groups`, `suspended_groups`, `closed_groups`, `groups_today`. Users: `users`, `users_today`, `users_active_30d`, `memberships`. SMS: `sms_total`, `sms_sent_today`, `sms_queued`, `sms_failed_7d`. Money: `transaction_alerts`, `alerts_unassigned`, `accounts_connected` (verified, open bank accounts), `payments_paid`, `payments_paid_amount`, `invoices_today`, `fine_invoices_today` (raised by Legion, not imported), `open_withdrawal_requests`. `audit_entries` |
 | GET | `/admin/audit` | The latest 100 admin actions |
 | GET | `/admin/transactions?group_id=&type=&from=&to=&include_voided=true` | Paged ledger entries across every group, newest first. Dates are `YYYY-MM-DD` |
 
@@ -37,20 +37,27 @@ dispatcher inside the binary sends them through Africa's Talking
 username `sandbox` uses the sandbox). Failed sends are retried after 30 seconds,
 2 minutes, 10 minutes, 1 hour and 6 hours, then marked failed. Without credentials
 texts are written to the log instead. The legacy `disable_smses` setting marks
-every text failed without sending it.
+every text failed without sending it. A group whose notifications an admin switched
+off (`notifications_off`, below) has its texts marked failed the same way.
 
 ## Groups
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/admin/groups?q=&status=` | Paged. `q` matches part of the name, or the exact group id |
-| PATCH | `/admin/groups/{id}` | `{"status": "active" \| "suspended" \| "closed"}`. Members of a suspended or closed group get `403 group_suspended` on every group route |
+| GET | `/admin/groups?q=&status=&view=&sort=` | Paged. `q` matches part of the name, the exact group id, or part of the group's or contact's phone. `view=inactive`: active groups nobody has signed in to for 90 days (candidates for archiving). `sort=newest` puts the latest sign-ups first (default: by name). Each group has `active_members`, `registered_members` (members who have ever signed in), `last_seen_at` (a member's latest sign-in) and `contact` (owner, else creator: `user_id`, `name`, `phone`, `email`) |
+| GET | `/admin/groups/export` | The same list as CSV (same filters, no paging, up to 100,000 rows) |
+| GET | `/admin/groups/{id}` | One group: contact details, `created_by_name`, counts of `active_members`, `registered_members`, `contributions`, `accounts`, `loans`, `last_seen_at`, `notifications_off`. Its members, contributions and accounts come from the group's own endpoints, which admins can read |
+| PATCH | `/admin/groups/{id}` | Any of `status` (`active`, `suspended`, `closed`), `name`, `email`, `phone` (`null` clears), `notifications_off`. Returns the group as GET does. Members of a suspended or closed group get `403 group_suspended` on every group route |
+
+The admin panel calls suspended groups "locked" and closed groups "archived".
 
 ## Users
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/admin/users?q=&role=&active=` | Paged. `q` searches name, phone and email, or matches the exact user id; `role` is a platform role; `active` is `true` or `false` |
+| GET | `/admin/users?q=&role=&active=` | Paged. `q` searches name, phone and email, or matches the exact user id; `role` is a platform role; `active` is `true` or `false`. Each user has `group_list` (`group_id`, `group_name`, `is_official`) |
+| GET | `/admin/users/export` | The same list as CSV |
+| GET | `/admin/roles` | The fixed platform roles (the old panel's "user groups") with `name`, `description` and the number of active `users` holding each |
 | GET | `/admin/users/{id}` | One user, with platform roles and group memberships |
 | POST | `/admin/users` | `first_name`, `last_name`, `phone` and/or `email`, `password` (8+ characters), optional `platform_roles` |
 | PATCH | `/admin/users/{id}` | Any of the create fields except password, plus `is_active`. Send `null` to clear `email`, `phone` or `id_number` |
